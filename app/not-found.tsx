@@ -1,0 +1,2 @@
+import Link from "next/link";
+export default function NotFound(){return <main className="grid min-h-screen place-items-center bg-canvas p-6 text-center"><div><div className="text-7xl font-extrabold text-teal-600">404</div><h1 className="mt-4 text-2xl font-extrabold">Case not found</h1><p className="mt-2 text-muted">The requested record does not exist in this dataset.</p><Link href="/cases" className="btn-primary mt-6">Return to case library</Link></div></main>}
