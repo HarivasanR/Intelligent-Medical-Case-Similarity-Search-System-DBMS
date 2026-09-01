@@ -3,6 +3,15 @@ export type Gender = "MALE" | "FEMALE" | "OTHER";
 
 export interface SessionUser { id: number; name: string; email: string; role: Role }
 
+export interface ManagedUser {
+  id: number;
+  name: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  createdAt?: string;
+}
+
 export interface MedicalCase {
   id: number;
   caseCode: string;

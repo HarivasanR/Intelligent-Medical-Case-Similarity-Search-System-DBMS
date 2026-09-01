@@ -5,6 +5,14 @@ export const loginSchema = z.object({
   password: z.string().min(6),
 });
 
+export const createUserSchema = z.object({
+  fullName: z.string().min(2, "Full name must be at least 2 characters").max(120),
+  email: z.string().email("Invalid email address").max(190),
+  password: z.string().min(6, "Password must be at least 6 characters").max(100),
+  role: z.enum(["ADMIN", "STAFF"]),
+  isActive: z.boolean().default(true),
+});
+
 export const caseSchema = z.object({
   patientAge: z.coerce.number().int().min(0).max(120),
   patientGender: z.enum(["MALE", "FEMALE", "OTHER"]),

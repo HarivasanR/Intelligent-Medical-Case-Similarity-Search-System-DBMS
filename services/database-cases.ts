@@ -47,3 +47,79 @@ export async function listDatabaseCases(): Promise<MedicalCase[]> {
     WHERE mc.deleted_at IS NULL ORDER BY mc.created_at DESC`);
   return rows.map((r) => ({ id: r.id, caseCode: r.case_code, patientAge: r.patient_age, patientGender: r.patient_gender, category: r.category, symptoms: r.symptoms, medicalHistory: r.medical_history || "", clinicalObservations: r.clinical_observations, diagnosis: r.diagnosis || "Pending", treatment: r.treatment || "Not recorded", notes: r.notes || "", createdAt: new Date(r.created_at).toISOString(), createdBy: r.created_by }));
 }
+
+export interface DatabaseDashboardStats {
+  cases: MedicalCase[];
+  totalCases: number;
+  casesThisMonth: number;
+  totalSearches: number;
+  searchesToday: number;
+  clinicalDocuments: number;
+  activeUsers: number;
+  activeRoles: number;
+}
+
+export async function getDatabaseDashboardStats(): Promise<DatabaseDashboardStats> {
+  const cases = await listDatabaseCases();
+
+  const now = new Date();
+  const casesThisMonth = cases.filter((c) => {
+    const d = new Date(c.createdAt);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
+
+  let totalSearches = 0;
+  let searchesToday = 0;
+  try {
+    const [rows] = await getMySqlPool().query<RowDataPacket[]>(`
+      SELECT 
+        COUNT(*) AS total_searches,
+        COALESCE(SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END), 0) AS searches_today
+      FROM search_history
+    `);
+    if (rows.length > 0) {
+      totalSearches = Number(rows[0].total_searches || 0);
+      searchesToday = Number(rows[0].searches_today || 0);
+    }
+  } catch (error) {
+    console.error("Failed to fetch search history stats:", error);
+  }
+
+  let clinicalDocuments = cases.length;
+  try {
+    const mongo = await getMongoDb();
+    clinicalDocuments = await mongo.collection("clinical_records").countDocuments();
+  } catch (error) {
+    console.error("Failed to count MongoDB clinical records:", error);
+    clinicalDocuments = cases.length;
+  }
+
+  let activeUsers = 0;
+  let activeRoles = 0;
+  try {
+    const [rows] = await getMySqlPool().query<RowDataPacket[]>(`
+      SELECT 
+        COUNT(*) AS active_users,
+        COUNT(DISTINCT role_id) AS active_roles
+      FROM users
+      WHERE is_active = TRUE
+    `);
+    if (rows.length > 0) {
+      activeUsers = Number(rows[0].active_users || 0);
+      activeRoles = Number(rows[0].active_roles || 0);
+    }
+  } catch (error) {
+    console.error("Failed to fetch users stats:", error);
+  }
+
+  return {
+    cases,
+    totalCases: cases.length,
+    casesThisMonth,
+    totalSearches,
+    searchesToday,
+    clinicalDocuments,
+    activeUsers,
+    activeRoles,
+  };
+}
