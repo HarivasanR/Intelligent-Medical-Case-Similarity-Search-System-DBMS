@@ -111,7 +111,7 @@ export function buildCaseListWhere(filters: Pick<CaseListFilters, "query" | "cat
   const conditions = ["mc.deleted_at IS NULL"];
   const values: (string)[] = [];
   if (filters.query) {
-    const term = `%${filters.query.replace(/[\\\\%_]/g, "\\\\export async function listDatabaseCases(): Promise<MedicalCase[]> {")}%`;
+    const term = `%${filters.query}%`;
     conditions.push("(mc.case_code LIKE ? OR mc.symptoms LIKE ? OR EXISTS (SELECT 1 FROM case_diagnoses fcd JOIN diagnoses fd ON fd.id = fcd.diagnosis_id WHERE fcd.case_id = mc.id AND fd.name LIKE ?))");
     values.push(term, term, term);
   }
