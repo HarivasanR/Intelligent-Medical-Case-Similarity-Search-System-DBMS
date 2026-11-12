@@ -56,7 +56,9 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     await connection.commit();
     return { id: caseId, caseCode: code };
   } catch (error) {
-    await connection.rollback();
+    await connection.rollback().catch((rollbackError) => {
+      console.error("Failed to roll back MySQL transaction after case creation failed:", rollbackError);
+    });
     // Compensate for writes to external stores. These operations are best-effort:
     // a prolonged outage can still leave an orphan that needs reconciliation.
     if (caseId && qdrantClient && qdrantWriteAttempted) {
