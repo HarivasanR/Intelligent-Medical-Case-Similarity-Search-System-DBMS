@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDemoMode } from "@/lib/utils";
 import { getSession } from "@/lib/auth";
 import { demoUsers } from "@/lib/demo-data";
 import { createUserSchema } from "@/lib/validation";
@@ -13,7 +14,7 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden: Administrator privileges required." }, { status: 403 });
   }
 
-  if ((process.env.DATA_MODE || "demo") === "demo") {
+  if (isDemoMode()) {
     const users = demoUsers.map((u) => ({
       id: u.id,
       name: u.name,
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: firstError, details: parsed.error.flatten() }, { status: 400 });
   }
 
-  if ((process.env.DATA_MODE || "demo") === "demo") {
+  if (isDemoMode()) {
     const newUser = {
       id: Date.now(),
       name: parsed.data.fullName,

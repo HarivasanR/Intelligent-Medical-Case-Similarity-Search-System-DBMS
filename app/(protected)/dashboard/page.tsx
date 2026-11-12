@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { ArrowRight, ClipboardList, DatabaseZap, Search, Users } from "lucide-react";
 import { demoCases } from "@/lib/demo-data";
-import { formatDate } from "@/lib/utils";
+import { formatDate, isDemoMode } from "@/lib/utils";
+import { getSession } from "@/lib/auth";
 import { PageHeading } from "@/components/page-heading";
 import { getDatabaseDashboardStats } from "@/services/database-cases";
 import type { MedicalCase } from "@/types";
 
 export default async function DashboardPage() {
-  const isDemo = (process.env.DATA_MODE || "demo") === "demo";
+  const isDemo = isDemoMode();
+  const user = await getSession();
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   let cases: MedicalCase[] = [];
   let totalCases = 0;
@@ -78,7 +82,7 @@ export default async function DashboardPage() {
     <>
       <PageHeading
         eyebrow="Clinical intelligence workspace"
-        title="Good morning, Doctor"
+        title={`${greeting}, ${user?.name ?? "Doctor"}`}
         description="A concise overview of the synthetic case library, search activity, and database health."
         action={
           <Link href="/search" className="btn-primary">

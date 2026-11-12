@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isDemoMode } from "@/lib/utils";
 import { getSession } from "@/lib/auth";
 import { deactivateDatabaseUser } from "@/services/database-users";
 
@@ -20,7 +21,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid user ID provided." }, { status: 400 });
   }
 
-  if ((process.env.DATA_MODE || "demo") === "demo") {
+  if (isDemoMode()) {
     return NextResponse.json({
       item: { id: targetUserId, isActive: false },
       message: "User deactivated in demo mode.",

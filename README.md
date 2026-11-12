@@ -39,9 +39,15 @@ Demo mode is selected by `DATA_MODE=demo`; it uses 60 realistic synthetic cases 
 
 1. Start services: `docker compose up -d`.
 2. Copy `.env.example` to `.env.local` and set `DATA_MODE=database`.
-3. Run the MySQL scripts in `database/mysql/` in numeric order (the compose mount automatically runs `01_schema.sql` only on a new volume; run the remaining scripts manually or with your SQL client).
-4. Seed: `npm run seed` and `npm run seed:vectors`.
+3. On a **new** MySQL volume, Docker automatically runs every `.sql` script in `database/mysql/` (01 → 06) in order. On an existing volume, run them yourself with your SQL client; `04_triggers.sql` and `05_routines.sql` drop and recreate their objects, so they are safe to re-run.
+4. Seed: `npm run seed` (users + 60 cases into MySQL, MongoDB and Qdrant together). `npm run seed:vectors` rebuilds the Qdrant index from whatever is in MySQL, which is useful if Qdrant was reset.
 5. Start Next.js: `npm run dev`.
+
+In database mode the case library, case details, search history, and Admin panel all read live data. The Admin panel pings each database and shows its real status.
+
+### How a new case is saved across three databases
+
+`services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If either fails, MySQL rolls back and the MongoDB document is removed, so a case never exists in just one database.
 
 If `OPENAI_API_KEY` is absent, the local embedder remains available. To use an API provider, implement the same `EmbeddingService` interface in `services/embedding.ts`.
 

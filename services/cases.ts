@@ -2,7 +2,8 @@ import { demoCases } from "@/lib/demo-data";
 import { cosineSimilarity, embeddingService } from "@/services/embedding";
 import type { MedicalCase, SimilarityResult } from "@/types";
 
-export function caseToSearchText(item: MedicalCase) {
+// Same text is embedded by the seeder, by new cases, and by the demo search, so vectors stay comparable.
+export function caseToSearchText(item: Pick<MedicalCase, "symptoms" | "medicalHistory" | "clinicalObservations" | "diagnosis" | "treatment" | "notes">) {
   return [item.symptoms, item.medicalHistory, item.clinicalObservations, item.diagnosis, item.treatment, item.notes].join(" ");
 }
 

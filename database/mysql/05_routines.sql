@@ -1,4 +1,6 @@
 USE medmatch;
+DROP FUNCTION IF EXISTS fn_age_group;
+DROP PROCEDURE IF EXISTS sp_cases_by_diagnosis;
 DELIMITER $$
 
 CREATE FUNCTION fn_age_group(age_value TINYINT UNSIGNED)

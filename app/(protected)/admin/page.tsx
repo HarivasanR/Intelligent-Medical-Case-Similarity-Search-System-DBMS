@@ -2,17 +2,27 @@ import { redirect } from "next/navigation";
 import { Database, FileClock, ShieldCheck, UserCog } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { demoUsers } from "@/lib/demo-data";
+import { isDemoMode } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
 import { AdminUserManagement } from "@/components/admin-user-management";
 import { listDatabaseUsers } from "@/services/database-users";
+import { checkDatabaseHealth, type ServiceHealth } from "@/services/database-cases";
 import type { ManagedUser } from "@/types";
 
 export default async function AdminPage() {
   const user = await getSession();
   if (user?.role !== "ADMIN") redirect("/dashboard");
 
+  const isDemo = isDemoMode();
   let initialUsers: ManagedUser[] = [];
-  if ((process.env.DATA_MODE || "demo") === "demo") {
+  // Demo mode shows the designed topology; database mode pings each service for real.
+  let services: ServiceHealth[] = [
+    { name: "MySQL", description: "Structured system of record", online: true },
+    { name: "MongoDB", description: "Flexible clinical documents", online: true },
+    { name: "Qdrant", description: "384-d cosine vector index", online: true },
+  ];
+  let auditEvents: number | null = 247;
+  if (isDemo) {
     initialUsers = demoUsers.map((u) => ({
       id: u.id,
       name: u.name,
@@ -23,21 +33,16 @@ export default async function AdminPage() {
   } else {
     try {
       initialUsers = await listDatabaseUsers();
-    } catch {
-      initialUsers = demoUsers.map((u) => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        isActive: true,
-      }));
+    } catch (error) {
+      console.error("Failed to list users:", error);
     }
+    ({ services, auditEvents } = await checkDatabaseHealth());
   }
 
   const cards = [
-    ["Registered users", String(initialUsers.length || "8"), UserCog],
-    ["Audit events", "247", FileClock],
-    ["Database services", "3 / 3", Database],
+    ["Registered users", String(initialUsers.length), UserCog],
+    ["Audit events", auditEvents === null ? "—" : String(auditEvents), FileClock],
+    ["Database services", `${services.filter((s) => s.online).length} / ${services.length}`, Database],
   ] as const;
 
   return (
@@ -64,11 +69,7 @@ export default async function AdminPage() {
         <section className="card p-5">
           <h2 className="font-extrabold">Database health</h2>
           <div className="mt-5 space-y-3">
-            {[
-              ["MySQL", "Structured system of record"],
-              ["MongoDB", "Flexible clinical documents"],
-              ["Qdrant", "384-d cosine vector index"],
-            ].map(([name, desc]) => (
+            {services.map(({ name, description: desc, online }) => (
               <div
                 key={name}
                 className="flex items-center gap-3 rounded-xl border border-slate-100 p-3"
@@ -80,12 +81,17 @@ export default async function AdminPage() {
                   <div className="font-bold">{name}</div>
                   <div className="truncate text-xs text-muted">{desc}</div>
                 </div>
-                <span className="ml-auto h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span
+                  title={online ? "Online" : "Offline"}
+                  className={`ml-auto h-2.5 w-2.5 rounded-full ${online ? "bg-emerald-500" : "bg-rose-500"}`}
+                />
               </div>
             ))}
           </div>
           <p className="mt-4 text-xs leading-5 text-muted">
-            Demo mode reports the designed service topology. Run Docker Compose and set DATA_MODE=database for live connectivity.
+            {isDemo
+              ? "Demo mode reports the designed service topology. Run Docker Compose and set DATA_MODE=database for live connectivity."
+              : "Live status: each database was pinged when this page loaded."}
           </p>
         </section>
       </div>
