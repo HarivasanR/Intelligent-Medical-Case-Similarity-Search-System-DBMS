@@ -6,14 +6,26 @@ import { caseToSearchText } from "@/services/cases";
 import { embeddingService } from "@/services/embedding";
 import type { MedicalCase } from "@/types";
 
-// Shared SELECT for a case with its primary diagnosis and treatment (used by list, detail and search).
+// Scalar subqueries keep one row per case even when it has multiple diagnoses or treatments.
+// Prefer explicitly primary diagnoses; use the most recently linked record as a safe fallback.
 export const CASE_SELECT = `
   SELECT mc.id, mc.case_code, mc.patient_age, mc.patient_gender, mc.category, mc.symptoms,
     mc.medical_history, mc.clinical_observations, mc.notes, mc.created_at,
-    u.full_name created_by, d.name diagnosis, t.description treatment
-  FROM medical_cases mc JOIN users u ON u.id=mc.created_by
-  LEFT JOIN case_diagnoses cd ON cd.case_id=mc.id AND cd.is_primary=TRUE LEFT JOIN diagnoses d ON d.id=cd.diagnosis_id
-  LEFT JOIN case_treatments ct ON ct.case_id=mc.id LEFT JOIN treatments t ON t.id=ct.treatment_id`;
+    u.full_name created_by,
+    (SELECT d.name
+       FROM case_diagnoses cd
+       JOIN diagnoses d ON d.id = cd.diagnosis_id
+      WHERE cd.case_id = mc.id
+      ORDER BY cd.is_primary DESC, cd.diagnosed_at DESC, cd.diagnosis_id DESC
+      LIMIT 1) AS diagnosis,
+    (SELECT t.description
+       FROM case_treatments ct
+       JOIN treatments t ON t.id = ct.treatment_id
+      WHERE ct.case_id = mc.id
+      ORDER BY ct.started_at DESC, ct.treatment_id DESC
+      LIMIT 1) AS treatment
+  FROM medical_cases mc
+  JOIN users u ON u.id = mc.created_by`;
 
 export function rowToCase(r: RowDataPacket): MedicalCase {
   return { id: Number(r.id), caseCode: r.case_code, patientAge: r.patient_age, patientGender: r.patient_gender, category: r.category, symptoms: r.symptoms, medicalHistory: r.medical_history || "", clinicalObservations: r.clinical_observations, diagnosis: r.diagnosis || "Pending", treatment: r.treatment || "Not recorded", notes: r.notes || "", createdAt: new Date(r.created_at).toISOString(), createdBy: r.created_by };
@@ -75,6 +87,67 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     }
     throw error;
   } finally { connection.release(); }
+}
+
+export interface CaseListFilters {
+  page: number;
+  pageSize: number;
+  query?: string;
+  category?: string;
+  gender?: "MALE" | "FEMALE" | "OTHER";
+}
+
+export interface PaginatedCases {
+  items: MedicalCase[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  categories: string[];
+}
+
+/** Build parameterized filters shared by the count and data queries. */
+export function buildCaseListWhere(filters: Pick<CaseListFilters, "query" | "category" | "gender">) {
+  const conditions = ["mc.deleted_at IS NULL"];
+  const values: (string)[] = [];
+  if (filters.query) {
+    const term = `%${filters.query.replace(/[\\\\%_]/g, "\\\\export async function listDatabaseCases(): Promise<MedicalCase[]> {")}%`;
+    conditions.push("(mc.case_code LIKE ? OR mc.symptoms LIKE ? OR EXISTS (SELECT 1 FROM case_diagnoses fcd JOIN diagnoses fd ON fd.id = fcd.diagnosis_id WHERE fcd.case_id = mc.id AND fd.name LIKE ?))");
+    values.push(term, term, term);
+  }
+  if (filters.category) {
+    conditions.push("mc.category = ?");
+    values.push(filters.category);
+  }
+  if (filters.gender) {
+    conditions.push("mc.patient_gender = ?");
+    values.push(filters.gender);
+  }
+  return { where: conditions.join(" AND "), values };
+}
+
+/** Fetch only the requested page; count and rows use identical filters. */
+export async function listDatabaseCasesPage(filters: CaseListFilters): Promise<PaginatedCases> {
+  const pool = getMySqlPool();
+  const { where, values } = buildCaseListWhere(filters);
+  const offset = (filters.page - 1) * filters.pageSize;
+  const [[countRows], [rows], [categoryRows]] = await Promise.all([
+    pool.query<RowDataPacket[]>(`SELECT COUNT(*) AS total FROM medical_cases mc WHERE ${where}`, values),
+    pool.query<RowDataPacket[]>(
+      `${CASE_SELECT} WHERE ${where} ORDER BY mc.created_at DESC, mc.id DESC LIMIT ? OFFSET ?`,
+      [...values, filters.pageSize, offset]
+    ),
+    pool.query<RowDataPacket[]>("SELECT DISTINCT category FROM medical_cases WHERE deleted_at IS NULL ORDER BY category"),
+  ]);
+  const total = Number(countRows[0]?.total ?? 0);
+  return {
+    items: rows.map(rowToCase),
+    total,
+    page: filters.page,
+    pageSize: filters.pageSize,
+    totalPages: Math.ceil(total / filters.pageSize),
+    categories: categoryRows.map((row) => String(row.category)),
+  };
 }
 
 export async function listDatabaseCases(): Promise<MedicalCase[]> {
