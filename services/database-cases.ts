@@ -41,8 +41,8 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     await connection.execute("INSERT INTO case_treatments (case_id, treatment_id) VALUES (?, ?)", [caseId, treatment.insertId]);
     await connection.execute("INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, 'CREATE', 'medical_case', ?, JSON_OBJECT('caseCode', ?))", [userId, caseId, code]);
 
-    // Write to MongoDB and Qdrant BEFORE committing MySQL: if either fails, the MySQL rows are rolled back
-    // so a case never exists in only one database.
+    // Write to MongoDB and Qdrant before committing MySQL. If a later step fails,
+    // the catch block rolls back MySQL and attempts compensating deletes in both stores.
     const mongo = await getMongoDb();
     mongoWriteAttempted = true;
     await mongo.collection("clinical_records").insertOne({ caseId, laboratoryResults: input.labResults, examinationDetails: input.examinationDetails, createdAt: new Date() });
