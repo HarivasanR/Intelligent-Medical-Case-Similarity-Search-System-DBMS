@@ -23,6 +23,9 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
   const pool = getMySqlPool();
   const connection = await pool.getConnection();
   let caseId = 0;
+  let mongoWriteAttempted = false;
+  let qdrantClient: Awaited<ReturnType<typeof ensureCollection>> | undefined;
+  let qdrantWriteAttempted = false;
   try {
     await connection.beginTransaction();
     const code = `MC-${Date.now().toString().slice(-8)}`;
@@ -41,17 +44,33 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     // Write to MongoDB and Qdrant BEFORE committing MySQL: if either fails, the MySQL rows are rolled back
     // so a case never exists in only one database.
     const mongo = await getMongoDb();
+    mongoWriteAttempted = true;
     await mongo.collection("clinical_records").insertOne({ caseId, laboratoryResults: input.labResults, examinationDetails: input.examinationDetails, createdAt: new Date() });
     const vector = await embeddingService.embed(caseToSearchText(input));
-    const qdrant = await ensureCollection();
-    await qdrant.upsert(getCollectionName(), { wait: true, points: [{ id: caseId, vector, payload: { caseId, diagnosis: input.diagnosis, age: input.patientAge, gender: input.patientGender, category: input.category } }] });
+    qdrantClient = await ensureCollection();
+    // Mark the write as attempted before awaiting it: a network error can occur after
+    // Qdrant has persisted the point but before the client receives its response.
+    qdrantWriteAttempted = true;
+    await qdrantClient.upsert(getCollectionName(), { wait: true, points: [{ id: caseId, vector, payload: { caseId, diagnosis: input.diagnosis, age: input.patientAge, gender: input.patientGender, category: input.category } }] });
 
     await connection.commit();
     return { id: caseId, caseCode: code };
   } catch (error) {
     await connection.rollback();
-    // Undo the MongoDB document if it was written before the failure (best effort).
-    if (caseId) await getMongoDb().then((db) => db.collection("clinical_records").deleteOne({ caseId })).catch(() => {});
+    // Compensate for writes to external stores. These operations are best-effort:
+    // a prolonged outage can still leave an orphan that needs reconciliation.
+    if (caseId && qdrantClient && qdrantWriteAttempted) {
+      await qdrantClient.delete(getCollectionName(), { points: [caseId], wait: true }).catch((cleanupError) => {
+        console.error("Failed to remove Qdrant point after case creation failed:", cleanupError);
+      });
+    }
+    if (caseId && mongoWriteAttempted) {
+      await getMongoDb()
+        .then((db) => db.collection("clinical_records").deleteOne({ caseId }))
+        .catch((cleanupError) => {
+          console.error("Failed to remove MongoDB clinical record after case creation failed:", cleanupError);
+        });
+    }
     throw error;
   } finally { connection.release(); }
 }
