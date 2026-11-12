@@ -47,7 +47,7 @@ In database mode the case library, case details, search history, and Admin panel
 
 ### How a new case is saved across three databases
 
-`services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If either fails, MySQL rolls back and the MongoDB document is removed, so a case never exists in just one database.
+`services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If an external write or the MySQL commit fails, MySQL rolls back and the service attempts compensating deletes in MongoDB and Qdrant. These cleanup operations are best-effort, not a distributed transaction; a database outage during compensation can still leave an orphan that requires reconciliation.
 
 If `OPENAI_API_KEY` is absent, the local embedder remains available. To use an API provider, implement the same `EmbeddingService` interface in `services/embedding.ts`.
 
