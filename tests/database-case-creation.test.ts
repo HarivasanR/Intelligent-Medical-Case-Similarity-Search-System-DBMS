@@ -131,6 +131,22 @@ describe("createDatabaseCase cross-store writes", () => {
     expect(releaseMock).toHaveBeenCalledOnce();
   });
 
+  it("compensates external stores when the final MySQL commit fails", async () => {
+    const failure = new Error("MySQL commit failed");
+    commitMock.mockRejectedValueOnce(failure);
+
+    await expect(createDatabaseCase(input, 5)).rejects.toBe(failure);
+
+    expect(rollbackMock).toHaveBeenCalledOnce();
+    expect(upsertMock).toHaveBeenCalledOnce();
+    expect(qdrantDeleteMock).toHaveBeenCalledWith("medical_cases_test", {
+      points: [42],
+      wait: true,
+    });
+    expect(deleteOneMock).toHaveBeenCalledWith({ caseId: 42 });
+    expect(releaseMock).toHaveBeenCalledOnce();
+  });
+
   it("attempts MongoDB cleanup when its insert reports a failure", async () => {
     const failure = new Error("MongoDB insert failed");
     insertOneMock.mockRejectedValueOnce(failure);
