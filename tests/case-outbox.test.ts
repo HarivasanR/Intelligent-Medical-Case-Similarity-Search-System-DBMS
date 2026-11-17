@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   getConnectionMock, beginTransactionMock, connectionExecuteMock, queryMock,
   commitMock, rollbackMock, releaseMock, poolExecuteMock, mongoReplaceMock,
-  qdrantUpsertMock, embedMock,
+  qdrantUpsertMock, embedMock, createIndexMock,
 } = vi.hoisted(() => ({
   getConnectionMock: vi.fn(),
   beginTransactionMock: vi.fn(),
@@ -16,6 +16,7 @@ const {
   mongoReplaceMock: vi.fn(),
   qdrantUpsertMock: vi.fn(),
   embedMock: vi.fn(),
+  createIndexMock: vi.fn(),
 }));
 
 vi.mock("@/lib/mysql", () => ({
@@ -25,7 +26,7 @@ vi.mock("@/lib/mysql", () => ({
   }),
 }));
 vi.mock("@/lib/mongodb", () => ({
-  getMongoDb: async () => ({ collection: () => ({ replaceOne: mongoReplaceMock }) }),
+  getMongoDb: async () => ({ collection: () => ({ replaceOne: mongoReplaceMock, createIndex: createIndexMock }) }),
 }));
 vi.mock("@/lib/qdrant", () => ({
   ensureCollection: async () => ({ upsert: qdrantUpsertMock }),
@@ -64,6 +65,7 @@ describe("case outbox worker", () => {
     releaseMock.mockReturnValue(undefined);
     poolExecuteMock.mockResolvedValue([{}, []]);
     mongoReplaceMock.mockResolvedValue({ acknowledged: true });
+    createIndexMock.mockResolvedValue("caseId_1");
     qdrantUpsertMock.mockResolvedValue({ status: "completed" });
     embedMock.mockResolvedValue([0.1, 0.2, 0.3]);
     getConnectionMock.mockResolvedValue({
@@ -81,6 +83,7 @@ describe("case outbox worker", () => {
     const result = await processCaseOutboxBatch(1);
 
     expect(result).toEqual({ claimed: 1, completed: 1 });
+    expect(createIndexMock).toHaveBeenCalledWith({ caseId: 1 }, { unique: true });
     expect(mongoReplaceMock).toHaveBeenCalledWith(
       { caseId: 42 },
       expect.objectContaining({ caseId: 42, laboratoryResults: payload.caseData.labResults }),
