@@ -91,10 +91,10 @@ async function markDestination(eventId: number, destination: "mongo" | "qdrant")
 }
 
 async function processEvent(event: OutboxRow) {
-  const payload = parsePayload(event.payload);
-  const { caseId, caseCode, caseData } = payload;
-
   try {
+    const payload = parsePayload(event.payload);
+    const { caseId, caseCode, caseData } = payload;
+
     // Each destination has its own durable completion marker. If one succeeds
     // and the other fails, the next attempt only retries the unfinished side.
     if (!event.mongo_completed_at) {
