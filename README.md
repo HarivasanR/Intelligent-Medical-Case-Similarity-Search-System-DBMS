@@ -47,7 +47,9 @@ In database mode the case library, case details, search history, and Admin panel
 
 ### How a new case is saved across three databases
 
-`services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If an external write or the MySQL commit fails, MySQL rolls back and the service attempts compensating deletes in MongoDB and Qdrant. These cleanup operations are best-effort, not a distributed transaction; a database outage during compensation can still leave an orphan that requires reconciliation.
+`services/database-cases.ts → createDatabaseCase` writes the case, diagnosis, treatment, audit row, and a `CASE_CREATED` outbox event in **one MySQL transaction**. The API commits without waiting for MongoDB or Qdrant. `services/case-outbox.ts` claims events with `SELECT ... FOR UPDATE SKIP LOCKED` and a two-minute lease, then upserts the MongoDB clinical document and Qdrant vector. MongoDB and Qdrant have separate completion timestamps, so a retry skips a destination that already succeeded. Stable `caseId` keys make both writes idempotent. Failures retry with capped exponential backoff; after 10 attempts an event becomes `DEAD` for operator inspection. Expired worker leases are reclaimable. This is an at-least-once delivery design, not a distributed transaction.
+
+Apply `database/mysql/07_case_outbox.sql` once to existing databases after the earlier schema scripts. New Docker volumes that automatically run the numbered SQL scripts will apply it in order. Run `npm run outbox:process` as a scheduled worker (or repeatedly under a process supervisor); it drains up to `OUTBOX_BATCH_SIZE` events (default 25) and exits. Monitor `case_outbox` rows in `PENDING`, `PROCESSING`, and `DEAD`. To replay a dead event after resolving the cause, set its status to `PENDING`, reset `attempts` to `0`, clear `last_error`/`locked_until`, and set `available_at = NOW()` for that row. The worker requires MySQL 8.0+ for `SKIP LOCKED`.
 
 ### Embeddings and environment variables
 
