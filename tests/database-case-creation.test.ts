@@ -1,28 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
-  beginTransactionMock,
-  commitMock,
-  rollbackMock,
-  releaseMock,
-  executeMock,
-  insertOneMock,
-  deleteOneMock,
-  upsertMock,
-  qdrantDeleteMock,
-  embedMock,
-  getConnectionMock,
+  beginTransactionMock, commitMock, rollbackMock, releaseMock, executeMock, getConnectionMock,
 } = vi.hoisted(() => ({
   beginTransactionMock: vi.fn(),
   commitMock: vi.fn(),
   rollbackMock: vi.fn(),
   releaseMock: vi.fn(),
   executeMock: vi.fn(),
-  insertOneMock: vi.fn(),
-  deleteOneMock: vi.fn(),
-  upsertMock: vi.fn(),
-  qdrantDeleteMock: vi.fn(),
-  embedMock: vi.fn(),
   getConnectionMock: vi.fn(),
 }));
 
@@ -30,25 +15,10 @@ vi.mock("@/lib/mysql", () => ({
   getMySqlPool: () => ({ getConnection: getConnectionMock }),
 }));
 
-vi.mock("@/lib/mongodb", () => ({
-  getMongoDb: async () => ({
-    collection: () => ({ insertOne: insertOneMock, deleteOne: deleteOneMock }),
-  }),
-}));
-
-vi.mock("@/lib/qdrant", () => ({
-  ensureCollection: async () => ({ upsert: upsertMock, delete: qdrantDeleteMock }),
-  getCollectionName: () => "medical_cases_test",
-  getQdrant: vi.fn(),
-}));
-
-vi.mock("@/services/embedding", () => ({
-  embeddingService: { embed: embedMock },
-}));
-
-vi.mock("@/services/cases", () => ({
-  caseToSearchText: () => "test clinical case",
-}));
+vi.mock("@/lib/mongodb", () => ({ getMongoDb: vi.fn() }));
+vi.mock("@/lib/qdrant", () => ({ ensureCollection: vi.fn(), getCollectionName: () => "medical_cases_test" }));
+vi.mock("@/services/embedding", () => ({ embeddingService: { embed: vi.fn() } }));
+vi.mock("@/services/cases", () => ({ caseToSearchText: () => "test clinical case" }));
 
 import { createDatabaseCase } from "@/services/database-cases";
 
@@ -66,7 +36,7 @@ const input = {
   examinationDetails: { chest: "Clear" },
 };
 
-describe("createDatabaseCase cross-store writes", () => {
+describe("createDatabaseCase transactional outbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     beginTransactionMock.mockResolvedValue(undefined);
@@ -86,99 +56,46 @@ describe("createDatabaseCase cross-store writes", () => {
       rollback: rollbackMock,
       release: releaseMock,
     });
-    insertOneMock.mockResolvedValue({ acknowledged: true });
-    deleteOneMock.mockResolvedValue({ acknowledged: true, deletedCount: 1 });
-    upsertMock.mockResolvedValue({ status: "completed" });
-    qdrantDeleteMock.mockResolvedValue({ status: "completed" });
-    embedMock.mockResolvedValue([0.1, 0.2, 0.3]);
   });
 
-  it("commits MySQL only after MongoDB and Qdrant writes succeed", async () => {
+  it("writes the outbox event in the same transaction before committing", async () => {
     const result = await createDatabaseCase(input, 5);
+    const outboxCall = executeMock.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO case_outbox"));
 
     expect(result.id).toBe(42);
     expect(result.caseCode).toMatch(/^MC-/);
     expect(beginTransactionMock).toHaveBeenCalledOnce();
-    expect(insertOneMock).toHaveBeenCalledWith(expect.objectContaining({
-      caseId: 42,
-      laboratoryResults: input.labResults,
-      examinationDetails: input.examinationDetails,
-    }));
-    expect(upsertMock).toHaveBeenCalledWith("medical_cases_test", expect.objectContaining({
-      wait: true,
-      points: [expect.objectContaining({ id: 42, payload: expect.objectContaining({ caseId: 42 }) })],
-    }));
+    expect(outboxCall).toBeDefined();
+    expect(outboxCall?.[1]).toEqual([
+      "CASE_CREATED",
+      42,
+      expect.stringContaining('"caseId":42'),
+    ]);
+    expect(String(outboxCall?.[1][2])).toContain('"diagnosis":"Pneumonia"');
     expect(commitMock).toHaveBeenCalledOnce();
     expect(rollbackMock).not.toHaveBeenCalled();
-    expect(qdrantDeleteMock).not.toHaveBeenCalled();
-    expect(deleteOneMock).not.toHaveBeenCalled();
     expect(releaseMock).toHaveBeenCalledOnce();
   });
 
-  it("rolls back MySQL and compensates both external stores when Qdrant upsert fails", async () => {
-    const failure = new Error("Qdrant write timed out");
-    upsertMock.mockRejectedValueOnce(failure);
+  it("rolls back the authoritative case when enqueueing the outbox event fails", async () => {
+    const failure = new Error("Outbox insert failed");
+    executeMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("INSERT INTO medical_cases")) return [{ insertId: 42 }, []];
+      if (sql.includes("INSERT INTO diagnoses")) return [{ insertId: 7 }, []];
+      if (sql.includes("INSERT INTO treatments")) return [{ insertId: 8 }, []];
+      if (sql.includes("INSERT INTO case_outbox")) throw failure;
+      return [{ insertId: 0 }, []];
+    });
 
     await expect(createDatabaseCase(input, 5)).rejects.toBe(failure);
-
     expect(rollbackMock).toHaveBeenCalledOnce();
     expect(commitMock).not.toHaveBeenCalled();
-    expect(qdrantDeleteMock).toHaveBeenCalledWith("medical_cases_test", {
-      points: [42],
-      wait: true,
-    });
-    expect(deleteOneMock).toHaveBeenCalledWith({ caseId: 42 });
     expect(releaseMock).toHaveBeenCalledOnce();
   });
 
-  it("compensates external stores when the final MySQL commit fails", async () => {
-    const failure = new Error("MySQL commit failed");
-    commitMock.mockRejectedValueOnce(failure);
-
-    await expect(createDatabaseCase(input, 5)).rejects.toBe(failure);
-
-    expect(rollbackMock).toHaveBeenCalledOnce();
-    expect(upsertMock).toHaveBeenCalledOnce();
-    expect(qdrantDeleteMock).toHaveBeenCalledWith("medical_cases_test", {
-      points: [42],
-      wait: true,
-    });
-    expect(deleteOneMock).toHaveBeenCalledWith({ caseId: 42 });
-    expect(releaseMock).toHaveBeenCalledOnce();
-  });
-
-  it("attempts MongoDB cleanup when its insert reports a failure", async () => {
-    const failure = new Error("MongoDB insert failed");
-    insertOneMock.mockRejectedValueOnce(failure);
-
-    await expect(createDatabaseCase(input, 5)).rejects.toBe(failure);
-
-    expect(rollbackMock).toHaveBeenCalledOnce();
-    expect(upsertMock).not.toHaveBeenCalled();
-    expect(qdrantDeleteMock).not.toHaveBeenCalled();
-    expect(deleteOneMock).toHaveBeenCalledWith({ caseId: 42 });
-    expect(commitMock).not.toHaveBeenCalled();
-    expect(releaseMock).toHaveBeenCalledOnce();
-  });
-
-  it("still attempts external cleanup if MySQL rollback fails", async () => {
-    const failure = new Error("Qdrant write failed");
-    upsertMock.mockRejectedValueOnce(failure);
-    rollbackMock.mockRejectedValueOnce(new Error("MySQL rollback failed"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    await expect(createDatabaseCase(input, 5)).rejects.toBe(failure);
-
-    expect(errorSpy).toHaveBeenCalledWith(
-      "Failed to roll back MySQL transaction after case creation failed:",
-      expect.any(Error),
-    );
-    expect(qdrantDeleteMock).toHaveBeenCalledWith("medical_cases_test", {
-      points: [42],
-      wait: true,
-    });
-    expect(deleteOneMock).toHaveBeenCalledWith({ caseId: 42 });
-    expect(releaseMock).toHaveBeenCalledOnce();
-    errorSpy.mockRestore();
+  it("does not call MongoDB or Qdrant in the request transaction", async () => {
+    await createDatabaseCase(input, 5);
+    expect(executeMock).toHaveBeenCalled();
+    // External stores are exclusively owned by the background outbox worker.
   });
 });
