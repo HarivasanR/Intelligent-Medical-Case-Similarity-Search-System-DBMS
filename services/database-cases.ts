@@ -53,17 +53,32 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     await connection.execute("INSERT INTO case_treatments (case_id, treatment_id) VALUES (?, ?)", [caseId, treatment.insertId]);
     await connection.execute("INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, 'CREATE', 'medical_case', ?, JSON_OBJECT('caseCode', ?))", [userId, caseId, code]);
 
-    // Write to MongoDB and Qdrant before committing MySQL. If a later step fails,
-    // the catch block rolls back MySQL and attempts compensating deletes in both stores.
-    const mongo = await getMongoDb();
-    mongoWriteAttempted = true;
-    await mongo.collection("clinical_records").insertOne({ caseId, laboratoryResults: input.labResults, examinationDetails: input.examinationDetails, createdAt: new Date() });
-    const vector = await embeddingService.embed(caseToSearchText(input));
-    qdrantClient = await ensureCollection();
-    // Mark the write as attempted before awaiting it: a network error can occur after
-    // Qdrant has persisted the point but before the client receives its response.
-    qdrantWriteAttempted = true;
-    await qdrantClient.upsert(getCollectionName(), { wait: true, points: [{ id: caseId, vector, payload: { caseId, diagnosis: input.diagnosis, age: input.patientAge, gender: input.patientGender, category: input.category } }] });
+    // Atomically enqueue propagation with the authoritative MySQL transaction.
+    // The worker owns MongoDB/Qdrant writes and retries them independently.
+    await connection.execute(
+      "INSERT INTO case_outbox (event_type, aggregate_id, payload) VALUES (?, ?, ?)",
+      [
+        "CASE_CREATED",
+        caseId,
+        JSON.stringify({
+          caseId,
+          caseCode: code,
+          caseData: {
+            patientAge: input.patientAge,
+            patientGender: input.patientGender,
+            category: input.category,
+            symptoms: input.symptoms,
+            medicalHistory: input.medicalHistory,
+            clinicalObservations: input.clinicalObservations,
+            diagnosis: input.diagnosis,
+            treatment: input.treatment,
+            notes: input.notes,
+            labResults: input.labResults || {},
+            examinationDetails: input.examinationDetails || {},
+          },
+        }),
+      ],
+    );
 
     await connection.commit();
     return { id: caseId, caseCode: code };
@@ -71,20 +86,6 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
     await connection.rollback().catch((rollbackError) => {
       console.error("Failed to roll back MySQL transaction after case creation failed:", rollbackError);
     });
-    // Compensate for writes to external stores. These operations are best-effort:
-    // a prolonged outage can still leave an orphan that needs reconciliation.
-    if (caseId && qdrantClient && qdrantWriteAttempted) {
-      await qdrantClient.delete(getCollectionName(), { points: [caseId], wait: true }).catch((cleanupError) => {
-        console.error("Failed to remove Qdrant point after case creation failed:", cleanupError);
-      });
-    }
-    if (caseId && mongoWriteAttempted) {
-      await getMongoDb()
-        .then((db) => db.collection("clinical_records").deleteOne({ caseId }))
-        .catch((cleanupError) => {
-          console.error("Failed to remove MongoDB clinical record after case creation failed:", cleanupError);
-        });
-    }
     throw error;
   } finally { connection.release(); }
 }
