@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { RowDataPacket } from "mysql2";
 import { getSession } from "@/lib/auth";
 import { getMySqlPool } from "@/lib/mysql";
-import { getCollectionName, getQdrant } from "@/lib/qdrant";
+import { ensureCollection, getCollectionName } from "@/lib/qdrant";
 import { isDemoMode } from "@/lib/utils";
 import { searchSchema } from "@/lib/validation";
 import { embeddingService } from "@/services/embedding";
@@ -24,7 +24,8 @@ export async function POST(request: Request) {
     // 1. Qdrant: embed the query and find the nearest case vectors, applying structured filters on the payload.
     const vector = await embeddingService.embed(query);
     const must = [gender && { key: "gender", match: { value: gender } }, category && { key: "category", match: { value: category } }, minAge !== undefined && { key: "age", range: { gte: minAge } }, maxAge !== undefined && { key: "age", range: { lte: maxAge } }].filter(Boolean) as never[];
-    const response = await getQdrant().query(getCollectionName(), { query: vector, limit, filter: must.length ? { must } : undefined, with_payload: true });
+    const qdrant = await ensureCollection();
+    const response = await qdrant.query(getCollectionName(), { query: vector, limit, filter: must.length ? { must } : undefined, with_payload: true });
     const scoreMap = new Map<number, number>(response.points.map((hit) => [Number(hit.id), hit.score]));
 
     // 2. MySQL: load the full case rows for the matched IDs.

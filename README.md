@@ -14,7 +14,7 @@ MedMatch is a polished DBMS Level 3 academic project for finding similar **synth
 - Search history and Admin-only user/service/audit overview
 - MySQL DDL, DML, constraints, indexes, FULLTEXT, views, trigger, stored function, stored procedure, transactions, and query examples
 - MongoDB indexes and aggregation example
-- Offline deterministic embedding fallback for no-key demos; pluggable embedding abstraction for API providers
+- Offline deterministic embedding fallback for no-key demos and a Gemini embedding provider
 
 ## Stack
 
@@ -49,7 +49,15 @@ In database mode the case library, case details, search history, and Admin panel
 
 `services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If an external write or the MySQL commit fails, MySQL rolls back and the service attempts compensating deletes in MongoDB and Qdrant. These cleanup operations are best-effort, not a distributed transaction; a database outage during compensation can still leave an orphan that requires reconciliation.
 
-If `OPENAI_API_KEY` is absent, the local embedder remains available. To use an API provider, implement the same `EmbeddingService` interface in `services/embedding.ts`.
+### Embeddings and environment variables
+
+The app uses the server-side Gemini provider when `GOOGLE_API_KEY` is set; otherwise it preserves the deterministic `LocalHashEmbeddingService` fallback. The API key is read only on the server. Never put it in client-side code or commit a real value.
+
+For the zero-setup demo, set `DATA_MODE=demo` and a long random `AUTH_SECRET`. For database mode, also configure `MYSQL_URL`, `MONGODB_URL`, `MONGODB_DB`, and `QDRANT_URL`; set `QDRANT_API_KEY` if the Qdrant deployment requires it. `QDRANT_COLLECTION` defaults to `medical_cases`.
+
+Gemini settings are `GOOGLE_API_KEY`, `GOOGLE_EMBEDDING_MODEL` (defaults to `gemini-embedding-2`), and `GOOGLE_EMBEDDING_DIMENSIONS` (defaults to 768). Without the key, the local fallback emits 384-dimensional vectors. `QDRANT_VECTOR_SIZE` is optional and defaults to the selected provider's dimension. If explicitly set, it must match the provider. Existing collections are checked at startup/use time and mismatches fail with a message to rebuild the index.
+
+Changing embedding provider, model, or output dimensions changes the vector space. Recreate the configured Qdrant collection and run `npm run seed:vectors` to re-embed every case before using the new provider. Do not mix vectors from different embedding models or dimensions in one collection. Back up any vectors you need before recreating the collection.
 
 ## Verification
 
