@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed.ts",
-    "seed:vectors": "tsx scripts/seed-qdrant.ts"
+    "seed:vectors": "tsx scripts/seed-qdrant.ts",
+    "outbox:process": "tsx scripts/process-outbox.ts"
   },
   "dependencies": {
     "@qdrant/js-client-rest": "^1.15.1",
