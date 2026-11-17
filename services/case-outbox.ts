@@ -99,7 +99,9 @@ async function processEvent(event: OutboxRow) {
     // and the other fails, the next attempt only retries the unfinished side.
     if (!event.mongo_completed_at) {
       const mongo = await getMongoDb();
-      await mongo.collection("clinical_records").replaceOne(
+      const clinicalRecords = mongo.collection("clinical_records");
+      await clinicalRecords.createIndex({ caseId: 1 }, { unique: true });
+      await clinicalRecords.replaceOne(
         { caseId },
         {
           caseId,
