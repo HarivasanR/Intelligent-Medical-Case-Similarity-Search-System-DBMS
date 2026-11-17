@@ -39,7 +39,7 @@ Demo mode is selected by `DATA_MODE=demo`; it uses 60 realistic synthetic cases 
 
 1. Start services: `docker compose up -d`.
 2. Copy `.env.example` to `.env.local` and set `DATA_MODE=database`.
-3. On a **new** MySQL volume, Docker automatically runs every `.sql` script in `database/mysql/` (01 → 06) in order. On an existing volume, run them yourself with your SQL client; `04_triggers.sql` and `05_routines.sql` drop and recreate their objects, so they are safe to re-run.
+3. On a **new** MySQL volume, Docker automatically runs every `.sql` script in `database/mysql/` (01 → 07) in order. On an existing volume, run them yourself with your SQL client; `04_triggers.sql` and `05_routines.sql` drop and recreate their objects, so they are safe to re-run.
 4. Seed: `npm run seed` (users + 60 cases into MySQL, MongoDB and Qdrant together). `npm run seed:vectors` rebuilds the Qdrant index from whatever is in MySQL, which is useful if Qdrant was reset.
 5. Start Next.js: `npm run dev`.
 
