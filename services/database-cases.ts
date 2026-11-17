@@ -1,9 +1,5 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getMySqlPool } from "@/lib/mysql";
-import { getMongoDb } from "@/lib/mongodb";
-import { ensureCollection, getCollectionName, getQdrant } from "@/lib/qdrant";
-import { caseToSearchText } from "@/services/cases";
-import { embeddingService } from "@/services/embedding";
 import type { MedicalCase } from "@/types";
 
 // Scalar subqueries keep one row per case even when it has multiple diagnoses or treatments.
@@ -35,9 +31,6 @@ export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCo
   const pool = getMySqlPool();
   const connection = await pool.getConnection();
   let caseId = 0;
-  let mongoWriteAttempted = false;
-  let qdrantClient: Awaited<ReturnType<typeof ensureCollection>> | undefined;
-  let qdrantWriteAttempted = false;
   try {
     await connection.beginTransaction();
     const code = `MC-${Date.now().toString().slice(-8)}`;
