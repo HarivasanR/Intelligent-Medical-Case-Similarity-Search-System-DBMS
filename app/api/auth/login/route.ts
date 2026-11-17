@@ -12,8 +12,8 @@ export async function POST(request: Request) {
   if (!parsed.success) return NextResponse.json({ error: "Enter a valid email and password." }, { status: 400 });
   const { email, password } = parsed.data;
   if (isDemoMode()) {
-    const user = demoUsers.find((item) => item.email === email && item.password === password);
-    if (!user) return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
+    const user = demoUsers.find((item) => item.email === email);
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
     await createSession(user);
     return NextResponse.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   }

@@ -4,27 +4,34 @@ services:
     environment:
       MYSQL_DATABASE: medmatch
       MYSQL_USER: medmatch
-      MYSQL_PASSWORD: medmatch
-      MYSQL_ROOT_PASSWORD: rootpassword
-    ports: ["3306:3306"]
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run npm run setup}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run npm run setup}
+    ports: ["127.0.0.1:3306:3306"]
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/mysql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      test: ["CMD-SHELL", 'MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysqladmin ping -h 127.0.0.1 -u root --silent']
       interval: 5s
       timeout: 5s
       retries: 20
 
   mongodb:
     image: mongo:7
-    ports: ["27017:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: medmatch_root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Run npm run setup}
+    ports: ["127.0.0.1:27017:27017"]
     volumes:
       - mongo_data:/data/db
+      - ./database/mongodb/setup.js:/docker-entrypoint-initdb.d/setup.js:ro
+      - ./database/mongodb/model.json:/docker-entrypoint-initdb.d/model.json:ro
 
   qdrant:
     image: qdrant/qdrant:v1.19.0
-    ports: ["6333:6333", "6334:6334"]
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Run npm run setup}
+    ports: ["127.0.0.1:6333:6333", "127.0.0.1:6334:6334"]
     volumes:
       - qdrant_data:/qdrant/storage
 

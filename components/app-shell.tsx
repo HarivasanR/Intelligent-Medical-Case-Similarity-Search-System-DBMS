@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Activity, ClipboardList, History, LayoutDashboard, LogOut, Search, ShieldCheck, Stethoscope } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { Logo } from "@/components/logo";
-import { initials } from "@/lib/utils";
+import { initials, isDemoMode } from "@/lib/utils";
 
 const links = [
   ["Dashboard", "/dashboard", LayoutDashboard], ["Medical cases", "/cases", ClipboardList], ["Similarity search", "/search", Search], ["Search history", "/history", History]
@@ -19,7 +19,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     </aside>
     <div className="min-w-0">
       <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-slate-200/80 bg-white/90 px-5 backdrop-blur lg:px-8"><div className="flex items-center gap-3 lg:hidden"><Logo compact/><span className="font-extrabold">MedMatch</span></div><div className="hidden items-center gap-2 text-sm text-slate-500 lg:flex"><Stethoscope size={17} className="text-teal-600"/>Intelligent Medical Case Similarity & Search</div><div className="flex items-center gap-3"><div className="hidden text-right sm:block"><div className="text-sm font-bold">{user?.name}</div><div className="text-xs capitalize text-slate-500">{user?.role.toLowerCase()}</div></div><span className="grid h-10 w-10 place-items-center rounded-xl bg-teal-100 text-sm font-extrabold text-teal-700">{initials(user?.name || "User")}</span><form action="/api/auth/logout" method="post"><button aria-label="Log out" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><LogOut size={18}/></button></form></div></header>
-      <main className="p-5 lg:p-8">{children}</main>
+      <main className="p-5 pb-24 lg:p-8">{isDemoMode() && <p className="mb-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Demo mode: sample statistics and records. Changes are previews and are not saved.</p>}{children}</main>
       <nav className="fixed bottom-3 left-3 right-3 z-30 flex justify-around rounded-2xl border border-slate-200 bg-white p-2 shadow-xl lg:hidden">{links.slice(0,4).map(([label, href, Icon]) => <Link key={href} href={href} title={label} className="rounded-xl p-2.5 text-slate-500 hover:bg-teal-50 hover:text-teal-700"><Icon size={20}/></Link>)}</nav>
     </div>
   </div>;

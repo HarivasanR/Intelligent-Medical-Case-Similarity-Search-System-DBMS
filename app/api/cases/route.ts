@@ -27,6 +27,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ item: result }, { status: 201 });
   } catch (error) {
     console.error("Failed to create case:", error);
-    return NextResponse.json({ error: "Case could not be saved. Nothing was stored — check that MySQL, MongoDB and Qdrant are running." }, { status: 500 });
+    return NextResponse.json({ error: "Could not confirm the save. Refresh the case library before retrying; check database availability." }, { status: 500 });
   }
 }

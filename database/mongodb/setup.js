@@ -1,18 +1,16 @@
+// First-boot initializer; db:migrate installs the same validator on existing volumes.
 db = db.getSiblingDB("medmatch");
-db.createCollection("clinical_records", {
-  validator: { $jsonSchema: { bsonType: "object", required: ["caseId", "laboratoryResults", "createdAt"], properties: {
-    caseId: { bsonType: ["int", "long"] }, laboratoryResults: { bsonType: "object" }, observations: { bsonType: ["array", "object"] },
-    examinationDetails: { bsonType: "object" }, diagnosticReports: { bsonType: "array" }, additionalMetadata: { bsonType: "object" }, createdAt: { bsonType: "date" }
-  } } }
-});
+// mongosh exposes CommonJS require in Docker init scripts.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const schema = JSON.parse(require("fs").readFileSync("/docker-entrypoint-initdb.d/model.json", "utf8"));
+if (!db.getCollectionNames().includes("clinical_records")) db.createCollection("clinical_records");
+db.runCommand({ collMod: "clinical_records", validator: { $jsonSchema: schema }, validationLevel: "strict", validationAction: "error" });
 db.clinical_records.createIndex({ caseId: 1 }, { unique: true });
-db.clinical_records.createIndex({ "laboratoryResults.testName": 1 });
 db.clinical_records.createIndex({ createdAt: -1 });
-
-// Meaningful aggregation: summarize abnormal lab findings by test name.
+// Aggregate keys of the actual laboratory map emitted by forms and seed records.
 db.clinical_records.aggregate([
-  { $unwind: "$laboratoryResults" },
-  { $match: { "laboratoryResults.abnormal": true } },
-  { $group: { _id: "$laboratoryResults.testName", abnormalCount: { $sum: 1 }, averageValue: { $avg: "$laboratoryResults.numericValue" } } },
-  { $sort: { abnormalCount: -1 } }
+  { $project: { entries: { $objectToArray: "$laboratoryResults" } } },
+  { $unwind: "$entries" },
+  { $group: { _id: "$entries.k", casesWithField: { $sum: 1 } } },
+  { $sort: { casesWithField: -1 } }
 ]);

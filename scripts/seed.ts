@@ -1,28 +1,4 @@
-import fs from "fs";
-import path from "path";
-
-function loadEnv() {
-  for (const file of [".env.local", ".env"]) {
-    const filePath = path.resolve(process.cwd(), file);
-    if (fs.existsSync(filePath)) {
-      const content = fs.readFileSync(filePath, "utf-8");
-      for (const line of content.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx !== -1) {
-          const key = trimmed.slice(0, eqIdx).trim();
-          const val = trimmed.slice(eqIdx + 1).trim();
-          if (process.env[key] === undefined) {
-            process.env[key] = val;
-          }
-        }
-      }
-    }
-  }
-}
-loadEnv();
-
+import "./env";
 import bcrypt from "bcryptjs";
 import type { RowDataPacket } from "mysql2";
 import { getMySqlPool } from "../lib/mysql";
@@ -33,14 +9,17 @@ import { createDatabaseCase } from "../services/database-cases";
 async function main() {
   const pool = getMySqlPool();
   await pool.execute("INSERT IGNORE INTO roles (id,name,description) VALUES (1,'ADMIN','System administrator'),(2,'STAFF','Doctor or clinical staff')");
-  const adminHash = await bcrypt.hash("Admin@123", 12); const staffHash = await bcrypt.hash("Staff@123", 12);
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  const staffPassword = process.env.SEED_STAFF_PASSWORD;
+  if (!adminPassword || !staffPassword || adminPassword.length < 12 || staffPassword.length < 12) throw new Error("Run npm run setup to generate seed passwords.");
+  const adminHash = await bcrypt.hash(adminPassword, 12); const staffHash = await bcrypt.hash(staffPassword, 12);
   await pool.execute("INSERT INTO users (id,role_id,full_name,email,password_hash) VALUES (1,1,'Dr. Maya Rao','admin@medmatch.test',?),(2,2,'Dr. Arjun Nair','staff@medmatch.test',?) ON DUPLICATE KEY UPDATE full_name=VALUES(full_name)",[adminHash,staffHash]);
-  const [existingCaseRows] = await pool.query<RowDataPacket[]>("SELECT id FROM medical_cases");
-  const existingCaseIds = new Set(existingCaseRows.map((r) => Number(r.id)));
+  const [existingCaseRows] = await pool.query<RowDataPacket[]>("SELECT case_code FROM medical_cases");
+  const existingCaseIds = new Set(existingCaseRows.map((r) => String(r.case_code)));
 
   let insertedCount = 0;
   for (const item of demoCases) {
-    if (!existingCaseIds.has(item.id)) {
+    if (!existingCaseIds.has(item.caseCode)) {
       await createDatabaseCase(
         {
           patientAge: item.patientAge,
@@ -55,7 +34,8 @@ async function main() {
           labResults: item.labResults || {},
           examinationDetails: item.examinationDetails || {},
         },
-        item.id % 2 ? 1 : 2
+        item.id % 2 ? 1 : 2,
+        item.caseCode
       );
       insertedCount++;
     }
@@ -65,4 +45,4 @@ async function main() {
   console.log(`Seed complete: ${demoCases.length} total demo cases (${insertedCount} newly inserted, ${existingCaseIds.size} already existed).`);
   await pool.end(); process.exit(0);
 }
-main().catch((error)=>{console.error(error);process.exit(1)});
+main().catch(()=>{console.error("Seed failed. Check credentials, run db:migrate and ensure all services are available.");process.exit(1)});

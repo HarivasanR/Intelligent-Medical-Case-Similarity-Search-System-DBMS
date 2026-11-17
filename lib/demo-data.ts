@@ -1,8 +1,8 @@
 import type { MedicalCase } from "@/types";
 
 export const demoUsers = [
-  { id: 1, name: "Dr. Maya Rao", email: "admin@medmatch.test", password: "Admin@123", role: "ADMIN" as const },
-  { id: 2, name: "Dr. Arjun Nair", email: "staff@medmatch.test", password: "Staff@123", role: "STAFF" as const },
+  { id: 1, name: "Dr. Maya Rao", email: "admin@medmatch.test", passwordHash: "$2b$12$L3Ymhwexhv59sSQwG.tz0uWcN/lfJawjMdNeArdUnw7LRvgtqwMEy", role: "ADMIN" as const },
+  { id: 2, name: "Dr. Arjun Nair", email: "staff@medmatch.test", passwordHash: "$2b$12$OV3RMxWMk3S9teTUrkhfhOTlOzGZqbGr90gcgve2VxJf58nq.DWte", role: "STAFF" as const },
 ];
 
 const seeds = [

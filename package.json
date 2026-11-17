@@ -11,9 +11,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx scripts/seed.ts",
-    "seed:vectors": "tsx scripts/seed-qdrant.ts"
+    "seed:vectors": "tsx scripts/seed-qdrant.ts",
+    "setup": "node scripts/setup-env.mjs",
+    "db:up": "docker compose --env-file .env.local up -d --wait",
+    "db:stop": "docker compose --env-file .env.local stop",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "sync": "tsx scripts/sync.ts",
+    "test:integration": "tsx scripts/integration.ts",
+    "test:browser": "tsx scripts/browser-check.ts"
   },
   "dependencies": {
+    "@next/env": "^15.5.0",
     "@qdrant/js-client-rest": "^1.15.1",
     "bcryptjs": "^3.0.2",
     "clsx": "^2.1.1",
@@ -30,6 +38,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
+    "@playwright/test": "^1.65.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/bcryptjs": "^2.4.6",

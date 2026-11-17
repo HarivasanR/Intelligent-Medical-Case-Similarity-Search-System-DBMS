@@ -196,7 +196,7 @@ export function AdminUserManagement({ initialUsers, currentUserId }: AdminUserMa
 
               return (
                 <tr key={u.id} className="transition hover:bg-slate-50/50">
-                  <td className="py-4 font-bold text-ink">
+                  <td className="py-4 pr-4 font-bold text-ink">
                     {u.name}
                     {isSelf && (
                       <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
@@ -204,7 +204,7 @@ export function AdminUserManagement({ initialUsers, currentUserId }: AdminUserMa
                       </span>
                     )}
                   </td>
-                  <td className="py-4 text-muted">{u.email}</td>
+                  <td className="py-4 pr-4 text-muted break-all">{u.email}</td>
                   <td className="py-4">
                     <span
                       className={`badge ${
@@ -331,8 +331,8 @@ export function AdminUserManagement({ initialUsers, currentUserId }: AdminUserMa
                 <input
                   type="password"
                   required
-                  minLength={6}
-                  placeholder="Minimum 6 characters"
+                  minLength={12}
+                  placeholder="Minimum 12 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input"

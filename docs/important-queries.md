@@ -1,12 +1,16 @@
 # Important queries
 
-The executable examples are in [`database/mysql/07_important_queries.sql`](../database/mysql/07_important_queries.sql). They demonstrate:
+Examples: [07_important_queries.sql.example](../database/mysql/07_important_queries.sql.example). The suffix prevents accidental DML execution during Docker initialization. Review DML before execution; integration tests execute only the read-query section.
 
-- JOIN and aggregate counts for the most common diagnoses
-- GROUP BY and HAVING for diagnoses represented by more than three cases
-- A correlated subquery comparing each case with its category's average age
-- ORDER BY ranking and MySQL FULLTEXT natural-language relevance
-- INSERT, UPDATE, and DELETE DML examples
-- `v_case_summary`, `v_diagnosis_statistics`, and `v_search_statistics` views
-- `fn_age_group` and `sp_cases_by_diagnosis` stored routines
-- An AFTER UPDATE trigger that records important case changes
+The script demonstrates JOIN, GROUP BY, HAVING, aggregates, ORDER BY, correlated subqueries and FULLTEXT. Application workflows INSERT/UPDATE in transactions. Personal history deletion executes DELETE scoped to the current user and adds an audit entry. Case deletion soft-deletes MySQL and enqueues external projection removal.
+
+```sql
+SELECT * FROM v_case_summary LIMIT 5;
+SELECT * FROM v_diagnosis_statistics;
+SELECT * FROM v_search_statistics;
+SELECT fn_age_group(42);
+CALL sp_cases_by_diagnosis('Community-acquired pneumonia', 0, 120);
+SELECT id, case_id, operation, attempts, last_error FROM case_sync_outbox WHERE processed_at IS NULL;
+```
+
+For the trigger demonstration, begin a transaction, directly UPDATE symptoms, inspect the audit row, then ROLLBACK. Integration tests exercise this. MongoDB aggregation groups actual laboratory-map field keys. The browser keyword filter does not call SQL FULLTEXT; demonstrate that query separately. Views/routines/triggers need not all have UI buttons, but show actual database output in the viva.

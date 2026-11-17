@@ -4,7 +4,7 @@ import { embeddingService } from "@/services/embedding";
 let client: QdrantClient | undefined;
 export function getQdrant() {
   if (!process.env.QDRANT_URL) throw new Error("QDRANT_URL is not configured");
-  client ??= new QdrantClient({ url: process.env.QDRANT_URL, apiKey: process.env.QDRANT_API_KEY || undefined });
+  client ??= new QdrantClient({ url: process.env.QDRANT_URL, timeout: 5000, apiKey: process.env.QDRANT_API_KEY || undefined });
   return client;
 }
 
@@ -15,5 +15,9 @@ export async function ensureCollection() {
   const qdrant = getQdrant();
   const { exists } = await qdrant.collectionExists(getCollectionName());
   if (!exists) await qdrant.createCollection(getCollectionName(), { vectors: { size: embeddingService.dimensions, distance: "Cosine" } });
+  const info = await qdrant.getCollection(getCollectionName());
+  for (const [field, type] of [["gender", "keyword"], ["category", "keyword"], ["age", "integer"]] as const) {
+    if (!info.payload_schema?.[field]) await qdrant.createPayloadIndex(getCollectionName(), { wait: true, field_name: field, field_schema: type });
+  }
   return qdrant;
 }

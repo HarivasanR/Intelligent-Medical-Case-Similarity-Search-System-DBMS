@@ -13,6 +13,7 @@ export default async function DashboardPage() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
+  let loadError = false;
   let cases: MedicalCase[] = [];
   let totalCases = 0;
   let casesNote = "";
@@ -31,7 +32,7 @@ export default async function DashboardPage() {
     searchesNote = "12 today";
     clinicalDocs = demoCases.length;
     clinicalDocsNote = "MongoDB linked";
-    activeUsers = 8;
+    activeUsers = 2;
     usersNote = "2 roles";
   } else {
     try {
@@ -47,6 +48,7 @@ export default async function DashboardPage() {
       usersNote = `${stats.activeRoles} role${stats.activeRoles === 1 ? "" : "s"}`;
     } catch (error) {
       console.error("Failed to load dashboard statistics from database:", error);
+      loadError = true;
       cases = [];
       totalCases = 0;
       casesNote = "0 this month";
@@ -91,6 +93,7 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+      {loadError && <p role="alert" className="mb-5 rounded-xl bg-red-50 p-4 text-red-800">Database statistics are unavailable. Check the database services; displayed zero values are not confirmed counts.</p>}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map(([label, value, Icon, note]) => (
           <div className="card p-5" key={label}>

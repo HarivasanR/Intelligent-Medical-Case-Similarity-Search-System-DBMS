@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { signSessionToken, verifySessionToken } from "@/lib/session-token";
 
 describe("session tokens", () => {
@@ -14,4 +14,9 @@ describe("session tokens", () => {
     expect(await verifySessionToken(token.slice(0, -4) + "abcd")).toBeNull();
   });
   it("rejects garbage", async () => expect(await verifySessionToken("not-a-token")).toBeNull());
+  it("cannot sign without a configured secret", async () => {
+    vi.stubEnv("AUTH_SECRET", "");
+    try { expect(() => signSessionToken(user)).toThrow("AUTH_SECRET"); }
+    finally { vi.unstubAllEnvs(); }
+  });
 });

@@ -1,67 +1,90 @@
-# MedMatch — Intelligent Medical Case Similarity & Search System
+# MedMatch - Intelligent Medical Case Similarity & Search System
 
-MedMatch is a polished DBMS Level 3 academic project for finding similar **synthetic** historical medical cases. It is deliberately more than a CRUD app: MySQL stores normalized structured data, MongoDB stores variable clinical documents, and Qdrant retrieves semantic neighbours using cosine similarity.
+A DBMS Level 3 application for retrieving related **synthetic** historical medical cases. MySQL is the relational system of record, MongoDB stores flexible clinical documents, and Qdrant provides local vector similarity search. Educational reference only; not medical advice or diagnosis.
 
-> **Safety:** this is an educational reference system. It does not diagnose patients, provide medical advice, or use real patient information.
+## Start on Windows
 
-## Features
+Prerequisites: Node.js 22/24, npm (or pnpm), and Docker Desktop for database mode. Run commands from this repository directory.
 
-- Secure cookie-based authentication with Admin and Staff roles
-- Dashboard with case, search, category, and service-health views
-- Paginated case library with keyword, gender, and category filters
-- Validated case creation workflow spanning MySQL, MongoDB, and Qdrant
-- Similar-case search with natural-language query, age/gender/category filters, similarity scores, and explainable match reasons
-- Search history and Admin-only user/service/audit overview
-- MySQL DDL, DML, constraints, indexes, FULLTEXT, views, trigger, stored function, stored procedure, transactions, and query examples
-- MongoDB indexes and aggregation example
-- Offline deterministic embedding fallback for no-key demos; pluggable embedding abstraction for API providers
-
-## Stack
-
-Next.js 15 · React 19 · TypeScript · Tailwind CSS · Next.js Route Handlers · Zod · MySQL 8 · MongoDB 7 · Qdrant · Vitest.
-
-## Quick start (zero setup demo)
-
-```bash
+```powershell
 npm install
-copy .env.example .env.local   # PowerShell: Copy-Item .env.example .env.local
+npm run setup
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Demo accounts:
+Open http://localhost:3000 (or the printed port). Keep the terminal open; Ctrl+C stops it. Setup creates/fills missing `.env.local` values with random secrets, never prints secrets and preserves existing non-placeholder settings. Do not commit that file.
 
-- Admin: `admin@medmatch.test` / `Admin@123`
-- Staff: `staff@medmatch.test` / `Staff@123`
+Initial `DATA_MODE=demo` uses 60 cases without databases. Public sample accounts: `admin@medmatch.test` / `Admin@123`, or `staff@medmatch.test` / `Staff@123`. Their passwords are stored as bcrypt hashes. Demo changes validate/preview only and do not persist; sample statistics/history are labeled.
 
-Demo mode is selected by `DATA_MODE=demo`; it uses 60 realistic synthetic cases and a deterministic local embedding so the complete UI works immediately.
+## Full database mode - use for evaluation
 
-## Full database mode
+Start Docker Desktop, then:
 
-1. Start services: `docker compose up -d`.
-2. Copy `.env.example` to `.env.local` and set `DATA_MODE=database`.
-3. On a **new** MySQL volume, Docker automatically runs every `.sql` script in `database/mysql/` (01 → 06) in order. On an existing volume, run them yourself with your SQL client; `04_triggers.sql` and `05_routines.sql` drop and recreate their objects, so they are safe to re-run.
-4. Seed: `npm run seed` (users + 60 cases into MySQL, MongoDB and Qdrant together). `npm run seed:vectors` rebuilds the Qdrant index from whatever is in MySQL, which is useful if Qdrant was reset.
-5. Start Next.js: `npm run dev`.
+```powershell
+npm run setup
+npm run db:up
+npm run db:migrate
+npm run seed
+```
 
-In database mode the case library, case details, search history, and Admin panel all read live data. The Admin panel pings each database and shows its real status.
+Set `DATA_MODE=database` in `.env.local` and restart `npm run dev`. Emails: `admin@medmatch.test` and `staff@medmatch.test`. Passwords: generated `SEED_ADMIN_PASSWORD` and `SEED_STAFF_PASSWORD` in `.env.local`. Re-seeding does not reset existing account passwords or duplicate seeded case codes.
 
-### How a new case is saved across three databases
+Docker Compose reads `.env.local` through the npm scripts. MySQL uses port 3306, authenticated MongoDB 27017 and API-key-protected Qdrant 6333/6334, all bound to loopback. MySQL uses an application user; migrations alone use root credentials. Use TLS and managed secrets beyond local development.
 
-`services/database-cases.ts → createDatabaseCase` opens a MySQL transaction, inserts the case, diagnosis, treatment and audit rows, then writes the clinical document to MongoDB and the vector to Qdrant. **MySQL commits only after MongoDB and Qdrant succeed.** If either fails, MySQL rolls back and the MongoDB document is removed, so a case never exists in just one database.
+On fresh volumes MySQL runs SQL 01-06 then 08. The `.sql.example` query file is intentionally not auto-executed because it contains DML demonstrations. MongoDB installs its validator/indexes at first boot. `db:migrate` installs the new SQL integrity/outbox changes, refreshes the trigger and installs MongoDB validation/indexes. Run it before seeding. SQL DDL is not transactional; back up existing data and resolve invalid legacy records before upgrading.
 
-If `OPENAI_API_KEY` is absent, the local embedder remains available. To use an API provider, implement the same `EmbeddingService` interface in `services/embedding.ts`.
+`COMPOSE_PROJECT_NAME=medmatch` separates this authenticated stack from older `jackfruit_*` volumes. **Existing volumes retain their original credentials**; editing environment variables does not rotate database users. To reuse an old stack, supply its matching credentials and upgrade authentication explicitly. Do not delete volumes to fix credential errors. Stop other services occupying these ports.
+
+Later: `npm run db:up`, then `npm run dev`. Stop databases with `npm run db:stop` (data remains). Production: `npm run build`, then `npm start`. Both modes require AUTH_SECRET; there is no fallback signing key.
+
+## Application workflow
+
+1. Sign in as Admin/Staff and inspect the dashboard.
+2. Browse/filter cases and open a case ID.
+3. Create/edit a synthetic case; refresh to confirm persistence.
+4. Search `persistent cough fever difficulty breathing` and try age/gender/category filters.
+5. Open a result, review your personal history and delete an entry.
+6. Admin can additionally create/deactivate users, soft-delete cases, inspect health/audit counts and retry pending synchronization.
+
+History deletion performs real ownership-scoped SQL DELETE with an audit entry. Case deletion soft-deletes MySQL and removes external projections. Deactivated accounts lose access even with an existing session cookie.
+
+## Consistency and recovery
+
+A case mutation and clinical payload commit with a durable `case_sync_outbox` event in **one MySQL transaction**. After commit, ordered idempotent replay writes MongoDB/Qdrant. External failure leaves the case saved with visible pending status. Case detail reads the saved clinical snapshot while pending; similarity hydration excludes pending/deleted cases.
+
+This is **eventual consistency**, not a distributed ACID transaction. Partial external writes may exist until replay. A MySQL advisory lock serializes replay across requests/workers. Retries run after writes, before vector searches, from Admin, or explicitly:
+
+```powershell
+npm run sync
+npm run seed:vectors
+```
+
+Sync exits nonzero if events remain. Inspect service health and outbox last_error. A persistent failing event blocks later events to preserve ordering. Fix the service/data problem and retry. Vector rebuild upserts active synchronized cases after an index reset; it does not clear an existing collection. Run sync first.
+
+## Search approach
+
+LocalHashEmbeddingService lowercases alphanumeric tokens, hashes them into 384 weighted dimensions and normalizes them. Database mode uses Qdrant cosine similarity; demo mode combines cosine/token overlap. This is **local feature hashing**, not a trained medical semantic model; synonyms and negation have limited support. Adding an API key does not change the embedder. Scores measure text similarity, not diagnostic probability.
+
+The case library filters loaded records using browser-side substring matching. SQL FULLTEXT is separately implemented/demonstrated by the query script. Vector search filters age/gender/category. Date/diagnosis payload metadata are stored but have no current filter controls.
 
 ## Verification
 
-```bash
+```powershell
 npm run typecheck
 npm run lint
 npm test
 npm run build
+# With initialized databases and a running database-mode Next.js server:
+npm run test:integration
+# Optional: temporarily stops/restarts configured Qdrant for recovery testing:
+npm run test:integration -- --outage
+npm run test:browser
 ```
 
-See [`docs/testing.md`](docs/testing.md) for the viva smoke checklist and [`docs/database-design.md`](docs/database-design.md) for the ER diagram and multi-database justification.
+Browser checks use installed Edge on Windows. Elsewhere install Chromium with `npx playwright install chromium`, or set BROWSER_CHANNEL. Integration/browser tests create synthetic fixtures, soft-delete cases and deactivate temporary accounts; audit evidence remains. Use a local test stack. No volumes are reset.
+
+See [requirements checklist](docs/requirements-checklist.md), [viva guide](docs/demo-guide.md), [design](docs/database-design.md), [dictionary](docs/data-dictionary.md), [testing](docs/testing.md), [actual integration results](docs/integration-results.md), [browser results](docs/browser-results.md), and [screenshots](docs/screenshots/README.md). Instructor approval, title uniqueness, originality and both members' actual contributions need human evidence and are not claimed by the repository.
 
 ## Project map
 
-`app/` UI and route handlers · `components/` reusable interface · `lib/` auth, validation, connections, demo data · `services/` embeddings and database orchestration · `database/` executable SQL/Mongo/Qdrant artifacts · `scripts/` seeders · `docs/` submission documentation · `tests/` automated checks.
+app: pages/API routes; components: forms/tables/search; lib: connections/auth/validation/demo; services: case/user operations and synchronization; database: executable DB artifacts; scripts: setup/migration/seed/replay/test; docs: design/submission evidence; tests: unit checks.

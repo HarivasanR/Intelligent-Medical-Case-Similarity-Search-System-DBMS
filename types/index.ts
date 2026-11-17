@@ -26,6 +26,7 @@ export interface MedicalCase {
   notes: string;
   createdAt: string;
   createdBy: string;
+  syncPending?: boolean;
   labResults?: Record<string, string | number>;
   examinationDetails?: Record<string, string>;
 }

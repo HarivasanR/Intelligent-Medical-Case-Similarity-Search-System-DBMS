@@ -2,25 +2,25 @@
 
 ```mermaid
 flowchart TD
-  U[User] --> UI[Next.js + TypeScript + Tailwind]
-  UI --> API[Route Handlers + Zod + session authorization]
-  API --> SQL[(MySQL 8)]
-  API --> DOC[(MongoDB)]
-  API --> EMB[Embedding service abstraction]
-  EMB --> VEC[(Qdrant)]
+  U[Browser] --> UI[Next.js React pages]
+  UI --> API[Route handlers and server services]
+  API --> AUTH[Signed session and live role checks]
+  API --> SQL[(MySQL cases, users, audit, outbox)]
+  SQL --> SYNC[Ordered idempotent replay]
+  SYNC --> DOC[(MongoDB clinical records)]
+  SYNC --> EMB[Local 384-dimensional hashing]
+  EMB --> VEC[(Qdrant cosine index)]
+  API --> VEC
 ```
 
-## Similarity flow
+## Case mutations and recovery
 
-```mermaid
-sequenceDiagram
-  User->>Next.js: Natural-language clinical query + filters
-  Next.js->>Embedding: Generate normalized vector
-  Embedding->>Qdrant: Cosine nearest-neighbour search
-  Qdrant-->>Next.js: Ranked case IDs and scores
-  Next.js->>MySQL: Hydrate structured case data
-  Next.js->>MongoDB: Load flexible clinical records as needed
-  Next.js-->>User: Ranked, explainable reference results
-```
+The API validates input and live account access. One MySQL transaction writes cases, relationships, audit records and a durable clinical/case outbox snapshot. After commit, replay applies projections to MongoDB/Qdrant. An advisory lock serializes workers. Failed projection writes leave pending events; repeat writes are idempotent. Case detail reads the saved clinical snapshot while pending. Deleted/pending cases are excluded during vector-result hydration.
 
-The default local embedder uses deterministic feature hashing for offline development. The `EmbeddingService` interface can be replaced by an API-backed provider without changing search orchestration.
+Cross-database state is eventually consistent, not instantaneously atomic. A crash after external success but before marking an event processed repeats the same operation safely. Persistent failures block later events; retry from Admin or npm run sync after resolving the service/data issue.
+
+## Retrieval and access
+
+Case text combines symptoms, history, observations, diagnosis, treatment and notes. Query text uses the same local hashing embedder. Qdrant applies age/gender/category filters and cosine ranking. MySQL hydrates current cases and stores search history. History reads/deletes are restricted to the signed-in user.
+
+The browser library uses substring filtering. SQL FULLTEXT, views and routines have separate executable demonstrations. Sessions are HttpOnly/SameSite=Lax, Secure in production. API mutations reject explicitly foreign Origins. Live MySQL account checks revoke deactivated users, including existing cookies.
