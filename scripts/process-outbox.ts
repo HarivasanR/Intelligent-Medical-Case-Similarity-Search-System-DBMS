@@ -14,10 +14,10 @@ for (const file of [".env.local", ".env"]) {
   }
 }
 
-import { getMySqlPool } from "../lib/mysql";
-import { processCaseOutboxBatch } from "../services/case-outbox";
-
 async function main() {
+  // Import after loading .env so the embedding provider sees GOOGLE_API_KEY.
+  const { getMySqlPool } = await import("../lib/mysql");
+  const { processCaseOutboxBatch } = await import("../services/case-outbox");
   const result = await processCaseOutboxBatch(Number(process.env.OUTBOX_BATCH_SIZE || 25));
   console.log(`Outbox worker: claimed ${result.claimed}, completed ${result.completed}`);
   await getMySqlPool().end();
@@ -25,6 +25,6 @@ async function main() {
 
 main().catch(async (error) => {
   console.error("Outbox worker failed:", error);
-  try { await getMySqlPool().end(); } catch { /* preserve the original error */ }
+  try { const { getMySqlPool } = await import("../lib/mysql"); await getMySqlPool().end(); } catch { /* preserve the original error */ }
   process.exitCode = 1;
 });
