@@ -55,7 +55,20 @@ export class GeminiEmbeddingService implements EmbeddingService {
       },
     );
     if (!response.ok) {
-      throw new Error(`Gemini embedding request failed with status ${response.status}`);
+      // Google returns a structured error body that distinguishes key restrictions,
+      // disabled APIs, invalid models, and quota issues. Surface only its message;
+      // never log request headers or the API key.
+      const responseBody = await response.text();
+      let providerMessage = "";
+      try {
+        const parsed = JSON.parse(responseBody) as { error?: { message?: string; status?: string } };
+        providerMessage = [parsed.error?.status, parsed.error?.message].filter(Boolean).join(": ");
+      } catch {
+        providerMessage = responseBody.slice(0, 500);
+      }
+      throw new Error(
+        `Gemini embedding request failed with status ${response.status}${providerMessage ? `: ${providerMessage}` : ""}`,
+      );
     }
 
     const result = await response.json() as { embedding?: { values?: unknown } };
