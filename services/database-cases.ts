@@ -1,5 +1,7 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getMySqlPool } from "@/lib/mysql";
+import { getMongoDb } from "@/lib/mongodb";
+import { getQdrant } from "@/lib/qdrant";
 import type { MedicalCase } from "@/types";
 
 // Scalar subqueries keep one row per case even when it has multiple diagnoses or treatments.
