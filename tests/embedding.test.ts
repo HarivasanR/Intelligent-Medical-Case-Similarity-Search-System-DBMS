@@ -35,9 +35,14 @@ describe("embedding providers", () => {
     await expect(service.embed("clinical text")).rejects.toThrow("expected 3 finite numeric dimensions");
   });
 
-  it("does not include response bodies in provider errors", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("sensitive response", { status: 429 })));
+  it("surfaces Google's diagnostic error message without exposing request credentials", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: 403, status: "PERMISSION_DENIED", message: "Requests to this API are blocked by the API key restrictions." } }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    )));
     const service = new GeminiEmbeddingService({ apiKey: "test-key", dimensions: 3 });
-    await expect(service.embed("clinical text")).rejects.toThrow("status 429");
+    await expect(service.embed("clinical text")).rejects.toThrow(
+      "PERMISSION_DENIED: Requests to this API are blocked by the API key restrictions.",
+    );
   });
 });
