@@ -1,0 +1,10 @@
+{
+  "bsonType": "object",
+  "required": ["caseId", "laboratoryResults", "examinationDetails", "createdAt"],
+  "properties": {
+    "caseId": { "bsonType": ["int", "long", "double"], "minimum": 1, "multipleOf": 1 },
+    "laboratoryResults": { "bsonType": "object", "additionalProperties": { "bsonType": ["string", "int", "long", "double", "decimal"] } },
+    "examinationDetails": { "bsonType": "object", "additionalProperties": { "bsonType": "string" } },
+    "createdAt": { "bsonType": "date" }
+  }
+}

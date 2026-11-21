@@ -9,6 +9,10 @@ import { listDatabaseUsers } from "@/services/database-users";
 import { checkDatabaseHealth, type ServiceHealth } from "@/services/database-cases";
 import type { ManagedUser } from "@/types";
 
+import { SyncButton } from "@/components/sync-button";
+import { getMySqlPool } from "@/lib/mysql";
+import type { RowDataPacket } from "mysql2";
+
 export default async function AdminPage() {
   const user = await getSession();
   if (user?.role !== "ADMIN") redirect("/dashboard");
@@ -39,6 +43,11 @@ export default async function AdminPage() {
     ({ services, auditEvents } = await checkDatabaseHealth());
   }
 
+  let pending = 0;
+  if (!isDemo) {
+    const [rows] = await getMySqlPool().query<RowDataPacket[]>("SELECT COUNT(*) n FROM case_sync_outbox WHERE processed_at IS NULL");
+    pending = Number(rows[0].n);
+  }
   const cards = [
     ["Registered users", String(initialUsers.length), UserCog],
     ["Audit events", auditEvents === null ? "—" : String(auditEvents), FileClock],
@@ -67,7 +76,7 @@ export default async function AdminPage() {
           currentUserId={user.id}
         />
         <section className="card p-5">
-          <h2 className="font-extrabold">Database health</h2>
+<h2 className="font-extrabold">Database health</h2><p className="mt-3 text-sm">Pending case synchronization: {pending}</p><SyncButton/>
           <div className="mt-5 space-y-3">
             {services.map(({ name, description: desc, online }) => (
               <div

@@ -9,7 +9,7 @@ const PAGE_SIZE_DEFAULT = 10;
 const PAGE_SIZE_MAX = 50;
 
 function positiveInteger(value: string | null, fallback: number, maximum = Number.MAX_SAFE_INTEGER) {
-  if (!value || !/^\\d+$/.test(value)) return fallback;
+  if (!value || !/^\d+$/.test(value)) return fallback;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
 }
@@ -58,6 +58,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ item: result }, { status: 201 });
   } catch (error) {
     console.error("Failed to create case:", error);
-    return NextResponse.json({ error: "Case creation failed. Check database availability and retry; incomplete external writes are cleaned up on a best-effort basis." }, { status: 500 });
+    return NextResponse.json({ error: "Could not confirm the save. Refresh the case library before retrying; check database availability." }, { status: 500 });
   }
 }

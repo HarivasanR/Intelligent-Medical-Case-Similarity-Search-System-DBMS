@@ -1,17 +1,21 @@
 # Testing
 
-Automated tests cover pure validation and similarity logic. Run `npm test`.
+## Commands
 
-| ID | Description | Expected result | Status |
-|---|---|---|---|
-| T-01 | Valid staff login payload | Zod accepts email/password | PASS |
-| T-02 | Invalid login payload | Validation rejects malformed input | PASS |
-| T-03 | Age 150 case payload | Database-facing schema rejects age | PASS |
-| T-04 | Empty similarity query | Search schema rejects request | PASS |
-| T-05 | Identical embedding vectors | Cosine score is 1.0 | PASS |
-| T-06 | Cough + fever semantic query | Respiratory case ranks first in demo mode | PASS |
-| T-07 | Gender filter | Every returned result matches filter | PASS |
-| T-08 | Session token signed by the app | Token verifies and returns the same user | PASS |
-| T-09 | Tampered or garbage session token | Verification rejects it, user is sent to `/login` | PASS |
+- npm run typecheck: TypeScript validation.
+- npm run lint: ESLint.
+- npm test: validation, similarity and signed-session unit tests.
+- npm run build: optimized Next.js build.
+- npm run test:integration: actual API/MySQL/MongoDB/Qdrant assertions, with running database-mode server.
+- npm run test:integration -- --outage: additionally stops/restarts configured Qdrant to verify durable ordered replay. Local test stack only.
+- npm run test:browser: Playwright/Edge checks login, case create/edit/delete, search/history/Admin, mobile details and screenshots.
 
-Manual smoke checks for the viva: sign in as Admin and Staff, open dashboard, filter case library, open a case, create a case, run similarity search, inspect history, and verify the Admin panel is denied to Staff.
+## Recorded execution
+
+[Integration results](integration-results.md) and [browser results](browser-results.md) record actual runs and are written only after all assertions pass. Fixtures are synthetic, cases soft-deleted and temporary accounts deactivated; audit evidence remains. No volumes are removed.
+
+Database checks cover SQL age/text/hash rejection, MongoDB schema rejection, actual views/routines/FULLTEXT/aggregation, trigger plus rollback, persistence across databases, ownership-scoped history deletion, Staff restrictions, deactivation revocation and outage recovery. Unit tests alone do not establish database integration.
+
+Scripts read credentials from ignored .env.local and never record them in screenshots/reports. Results cover the local environment, not clinical validity, production certification or instructor approval.
+
+Final local checks on 17 November 2026: TypeScript and ESLint passed; 17 unit tests passed; optimized production build passed without the earlier jose Edge warning. The recorded integration run passed 12 grouped checks including a real Qdrant outage/recovery. Browser checks also passed against the optimized production server, and the screenshots are from that production run.

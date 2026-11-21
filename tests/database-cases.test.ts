@@ -9,7 +9,7 @@ vi.mock("@/lib/mysql", () => ({
 import { buildCaseListWhere, CASE_SELECT, listDatabaseCasesPage } from "@/services/database-cases";
 
 describe("database case listing", () => {
-  beforeEach(() => queryMock.mockReset());
+  beforeEach(() => { queryMock.mockReset(); });
 
   it("builds parameterized filters for text, category and gender", () => {
     const result = buildCaseListWhere({

@@ -17,7 +17,7 @@ export async function PATCH(
 
   const { id } = await params;
   const targetUserId = Number(id);
-  if (isNaN(targetUserId) || targetUserId <= 0) {
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) {
     return NextResponse.json({ error: "Invalid user ID provided." }, { status: 400 });
   }
 
@@ -34,17 +34,11 @@ export async function PATCH(
     return NextResponse.json({ item: result, message: "User deactivated successfully." });
   } catch (error) {
     console.error("Failed to deactivate user:", error);
-    const message = error instanceof Error ? error.message : "Failed to deactivate user.";
+    const allowed = ["Self-deactivation is not permitted. You cannot deactivate your own account.", "User not found.", "User is already deactivated.", "Cannot deactivate the last active Administrator account."];
+    const message = error instanceof Error && allowed.includes(error.message) ? error.message : "Could not deactivate user. Check database availability.";
     return NextResponse.json(
       { error: message },
       { status: 400 }
     );
   }
-}
-
-export async function DELETE(
-  request: Request,
-  props: { params: Promise<{ id: string }> }
-) {
-  return PATCH(request, props);
 }

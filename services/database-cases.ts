@@ -1,15 +1,17 @@
+import { randomUUID, createHash } from "node:crypto";
+import type { PoolConnection } from "mysql2/promise";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getMySqlPool } from "@/lib/mysql";
 import { getMongoDb } from "@/lib/mongodb";
 import { getQdrant } from "@/lib/qdrant";
+import { processCaseSync, type SyncCase } from "@/services/case-sync";
 import type { MedicalCase } from "@/types";
 
-// Scalar subqueries keep one row per case even when it has multiple diagnoses or treatments.
-// Prefer explicitly primary diagnoses; use the most recently linked record as a safe fallback.
 export const CASE_SELECT = `
   SELECT mc.id, mc.case_code, mc.patient_age, mc.patient_gender, mc.category, mc.symptoms,
     mc.medical_history, mc.clinical_observations, mc.notes, mc.created_at,
     u.full_name created_by,
+    EXISTS(SELECT 1 FROM case_sync_outbox o WHERE o.case_id=mc.id AND o.processed_at IS NULL) sync_pending,
     (SELECT d.name
        FROM case_diagnoses cd
        JOIN diagnoses d ON d.id = cd.diagnosis_id
@@ -26,64 +28,57 @@ export const CASE_SELECT = `
   JOIN users u ON u.id = mc.created_by`;
 
 export function rowToCase(r: RowDataPacket): MedicalCase {
-  return { id: Number(r.id), caseCode: r.case_code, patientAge: r.patient_age, patientGender: r.patient_gender, category: r.category, symptoms: r.symptoms, medicalHistory: r.medical_history || "", clinicalObservations: r.clinical_observations, diagnosis: r.diagnosis || "Pending", treatment: r.treatment || "Not recorded", notes: r.notes || "", createdAt: new Date(r.created_at).toISOString(), createdBy: r.created_by };
+  return { id: Number(r.id), caseCode: r.case_code, patientAge: r.patient_age, patientGender: r.patient_gender, category: r.category, symptoms: r.symptoms, medicalHistory: r.medical_history || "", clinicalObservations: r.clinical_observations, diagnosis: r.diagnosis || "Pending", treatment: r.treatment || "Not recorded", notes: r.notes || "", createdAt: new Date(r.created_at).toISOString(), createdBy: r.created_by, syncPending: Boolean(r.sync_pending) };
 }
 
-export async function createDatabaseCase(input: Omit<MedicalCase, "id" | "caseCode" | "createdAt" | "createdBy">, userId: number) {
-  const pool = getMySqlPool();
-  const connection = await pool.getConnection();
-  let caseId = 0;
+type CaseInput = Omit<MedicalCase, "id" | "caseCode" | "createdAt" | "createdBy" | "syncPending">;
+async function saveRelationships(connection: PoolConnection, caseId: number, input: CaseInput) {
+  const [diagnosis] = await connection.execute<ResultSetHeader>("INSERT INTO diagnoses (name) VALUES (?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)", [input.diagnosis]);
+  // Use a content-derived key so long treatment texts sharing a prefix don't overwrite each other.
+  const name = createHash("sha256").update(input.treatment).digest("hex");
+  const [treatment] = await connection.execute<ResultSetHeader>("INSERT INTO treatments (name, description) VALUES (?, ?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)", [name, input.treatment]);
+  await connection.execute("DELETE FROM case_diagnoses WHERE case_id=?", [caseId]);
+  await connection.execute("DELETE FROM case_treatments WHERE case_id=?", [caseId]);
+  await connection.execute("INSERT INTO case_diagnoses (case_id, diagnosis_id, is_primary) VALUES (?, ?, TRUE)", [caseId, diagnosis.insertId]);
+  await connection.execute("INSERT INTO case_treatments (case_id, treatment_id) VALUES (?, ?)", [caseId, treatment.insertId]);
+}
+
+// MySQL + durable outbox commit atomically. MongoDB/Qdrant are retryable projections, not a distributed transaction.
+async function saveCase(input: CaseInput | null, userId: number, id?: number, seedCode?: string) {
+  const creating = id === undefined;
+  const connection = await getMySqlPool().getConnection();
+  let item: SyncCase;
   try {
     await connection.beginTransaction();
-    const code = `MC-${Date.now().toString().slice(-8)}`;
-    const [result] = await connection.execute<ResultSetHeader>(
-      `INSERT INTO medical_cases (case_code, patient_age, patient_gender, category, symptoms, medical_history, clinical_observations, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [code, input.patientAge, input.patientGender, input.category, input.symptoms, input.medicalHistory, input.clinicalObservations, input.notes, userId]
-    );
-    caseId = result.insertId;
-    const [diagnosis] = await connection.execute<ResultSetHeader>("INSERT INTO diagnoses (name) VALUES (?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)", [input.diagnosis]);
-    const [treatment] = await connection.execute<ResultSetHeader>("INSERT INTO treatments (name, description) VALUES (?, ?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)", [input.treatment.slice(0, 250), input.treatment]);
-    await connection.execute("INSERT INTO case_diagnoses (case_id, diagnosis_id, is_primary) VALUES (?, ?, TRUE)", [caseId, diagnosis.insertId]);
-    await connection.execute("INSERT INTO case_treatments (case_id, treatment_id) VALUES (?, ?)", [caseId, treatment.insertId]);
-    await connection.execute("INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, 'CREATE', 'medical_case', ?, JSON_OBJECT('caseCode', ?))", [userId, caseId, code]);
-
-    // Atomically enqueue propagation with the authoritative MySQL transaction.
-    // The worker owns MongoDB/Qdrant writes and retries them independently.
-    await connection.execute(
-      "INSERT INTO case_outbox (event_type, aggregate_id, payload) VALUES (?, ?, ?)",
-      [
-        "CASE_CREATED",
-        caseId,
-        JSON.stringify({
-          caseId,
-          caseCode: code,
-          caseData: {
-            patientAge: input.patientAge,
-            patientGender: input.patientGender,
-            category: input.category,
-            symptoms: input.symptoms,
-            medicalHistory: input.medicalHistory,
-            clinicalObservations: input.clinicalObservations,
-            diagnosis: input.diagnosis,
-            treatment: input.treatment,
-            notes: input.notes,
-            labResults: input.labResults || {},
-            examinationDetails: input.examinationDetails || {},
-          },
-        }),
-      ],
-    );
-
+    let code = seedCode ?? `MC-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    let createdAt = new Date().toISOString();
+    if (id) {
+      const [rows] = await connection.query<RowDataPacket[]>("SELECT case_code, created_at FROM medical_cases WHERE id=? AND deleted_at IS NULL FOR UPDATE", [id]);
+      if (!rows.length) throw new Error("Case not found.");
+      code = rows[0].case_code; createdAt = new Date(rows[0].created_at).toISOString();
+      // App audit records the actual editor; suppress duplicate trigger entries. Reset in finally for pooled connections.
+      await connection.execute("SET @medmatch_actor = ?", [userId]);
+      if (input) await connection.execute(`UPDATE medical_cases SET patient_age=?, patient_gender=?, category=?, symptoms=?, medical_history=?, clinical_observations=?, notes=? WHERE id=?`, [input.patientAge, input.patientGender, input.category, input.symptoms, input.medicalHistory, input.clinicalObservations, input.notes, id]);
+      else await connection.execute("UPDATE medical_cases SET deleted_at=CURRENT_TIMESTAMP WHERE id=?", [id]);
+    } else {
+      if (!input) throw new Error("Case data required.");
+      const [result] = await connection.execute<ResultSetHeader>(`INSERT INTO medical_cases (case_code, patient_age, patient_gender, category, symptoms, medical_history, clinical_observations, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [code, input.patientAge, input.patientGender, input.category, input.symptoms, input.medicalHistory, input.clinicalObservations, input.notes, userId]);
+      id = result.insertId;
+    }
+    if (input) await saveRelationships(connection, id, input);
+    item = { ...(input ?? {} as CaseInput), id, caseCode: code, createdAt };
+    await connection.execute("INSERT INTO case_sync_outbox (case_id, operation, payload) VALUES (?, ?, ?)", [id, input ? "UPSERT" : "DELETE", JSON.stringify(item)]);
+    await connection.execute("INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, ?, 'medical_case', ?, JSON_OBJECT('caseCode', ?))", [userId, !input ? "DELETE" : creating ? "CREATE" : "UPDATE", id, code]);
     await connection.commit();
-    return { id: caseId, caseCode: code };
-  } catch (error) {
-    await connection.rollback().catch((rollbackError) => {
-      console.error("Failed to roll back MySQL transaction after case creation failed:", rollbackError);
-    });
-    throw error;
-  } finally { connection.release(); }
+  } catch (error) { await connection.rollback(); throw error; }
+  finally { await connection.query("SET @medmatch_actor = NULL"); connection.release(); }
+  await processCaseSync().catch(() => {}); // Never report a committed case as unsaved.
+  const [pending] = await getMySqlPool().query<RowDataPacket[]>("SELECT COUNT(*) n FROM case_sync_outbox WHERE case_id=? AND processed_at IS NULL", [item.id]);
+  return { id: item.id, caseCode: item.caseCode, syncPending: Number(pending[0].n) > 0 };
 }
+export async function createDatabaseCase(input: CaseInput, userId: number, seedCode?: string) { return saveCase(input, userId, undefined, seedCode); }
+export async function updateDatabaseCase(id: number, input: CaseInput, userId: number) { return saveCase(input, userId, id); }
+export async function deleteDatabaseCase(id: number, userId: number) { return saveCase(null, userId, id); }
 
 export interface CaseListFilters {
   page: number;
@@ -150,33 +145,35 @@ export async function listDatabaseCases(): Promise<MedicalCase[]> {
   const [rows] = await getMySqlPool().query<RowDataPacket[]>(`${CASE_SELECT} WHERE mc.deleted_at IS NULL ORDER BY mc.created_at DESC, mc.id DESC`);
   return rows.map(rowToCase);
 }
-
-/** One case = structured row from MySQL + flexible clinical document from MongoDB, joined by case ID. */
 export async function getDatabaseCase(id: number): Promise<MedicalCase | null> {
-  const [rows] = await getMySqlPool().query<RowDataPacket[]>(`${CASE_SELECT} WHERE mc.id = ? AND mc.deleted_at IS NULL`, [id]);
+  const [rows] = await getMySqlPool().query<RowDataPacket[]>(`${CASE_SELECT} WHERE mc.id=? AND mc.deleted_at IS NULL`, [id]);
   if (!rows.length) return null;
   const item = rowToCase(rows[0]);
-  try {
+  if (item.syncPending) {
+    const [events] = await getMySqlPool().query<RowDataPacket[]>("SELECT payload FROM case_sync_outbox WHERE case_id=? ORDER BY id DESC LIMIT 1", [id]);
+    const payload = typeof events[0].payload === "string" ? JSON.parse(events[0].payload) : events[0].payload;
+    item.labResults = payload.labResults; item.examinationDetails = payload.examinationDetails;
+  } else {
     const record = await (await getMongoDb()).collection("clinical_records").findOne({ caseId: id });
     if (record) { item.labResults = record.laboratoryResults; item.examinationDetails = record.examinationDetails; }
-  } catch (error) {
-    console.error("Failed to load MongoDB clinical record:", error);
   }
   return item;
 }
-
 export interface SearchHistoryItem { id: number; query: string; type: string; results: number; date: string; user: string; executionMs?: number }
-
-export async function listDatabaseSearchHistory(limit = 50): Promise<SearchHistoryItem[]> {
-  const [rows] = await getMySqlPool().query<RowDataPacket[]>(
-    `SELECT sh.id, sh.query_text, sh.search_type, sh.result_count, sh.execution_ms, sh.created_at, u.full_name
-     FROM search_history sh JOIN users u ON u.id = sh.user_id
-     ORDER BY sh.created_at DESC, sh.id DESC LIMIT ?`, [limit]);
-  return rows.map((r) => ({
-    id: Number(r.id), query: r.query_text, type: r.search_type.charAt(0) + r.search_type.slice(1).toLowerCase(),
-    results: Number(r.result_count), date: new Date(r.created_at).toISOString(), user: r.full_name,
-    executionMs: r.execution_ms ?? undefined,
-  }));
+export async function listDatabaseSearchHistory(userId: number, limit = 50): Promise<SearchHistoryItem[]> {
+  const [rows] = await getMySqlPool().query<RowDataPacket[]>(`SELECT sh.*, u.full_name FROM search_history sh JOIN users u ON u.id=sh.user_id WHERE sh.user_id=? ORDER BY sh.created_at DESC, sh.id DESC LIMIT ?`, [userId, limit]);
+  return rows.map(r => ({ id: Number(r.id), query: r.query_text, type: r.search_type, results: Number(r.result_count), date: new Date(r.created_at).toISOString(), user: r.full_name, executionMs: r.execution_ms ?? undefined }));
+}
+export async function deleteSearchHistory(id: number, userId: number) {
+  const connection = await getMySqlPool().getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.execute<ResultSetHeader>("DELETE FROM search_history WHERE id=? AND user_id=?", [id, userId]);
+    if (result.affectedRows) await connection.execute("INSERT INTO audit_logs (user_id, action, entity_type, entity_id) VALUES (?, 'DELETE', 'search_history', ?)", [userId, id]);
+    await connection.commit();
+    return result.affectedRows > 0;
+  } catch (error) { await connection.rollback(); throw error; }
+  finally { connection.release(); }
 }
 
 export interface DatabaseDashboardStats {

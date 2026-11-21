@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden: Administrator privileges required." }, { status: 403 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
   const parsed = createUserSchema.safeParse(body);
   if (!parsed.success) {
     const firstError = parsed.error.issues[0]?.message || "Invalid user information provided.";
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ item: newUser }, { status: 201 });
   } catch (error) {
     console.error("Failed to create user:", error);
-    const message = error instanceof Error ? error.message : "Failed to create user.";
+    const message = error instanceof Error && error.message === "A user with this email address is already registered." ? error.message : "Could not create user. Check the information and database availability.";
     return NextResponse.json(
       { error: message },
       { status: 400 }

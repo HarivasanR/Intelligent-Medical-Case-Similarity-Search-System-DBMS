@@ -9,6 +9,8 @@ import { embeddingService } from "@/services/embedding";
 import { findSimilarDemo } from "@/services/cases";
 import { CASE_SELECT, rowToCase } from "@/services/database-cases";
 
+import { processCaseSync } from "@/services/case-sync";
+
 export async function POST(request: Request) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,6 +23,7 @@ export async function POST(request: Request) {
 
   try {
     const startedAt = Date.now();
+    await processCaseSync();
     // 1. Qdrant: embed the query and find the nearest case vectors, applying structured filters on the payload.
     const vector = await embeddingService.embed(query);
     const must = [gender && { key: "gender", match: { value: gender } }, category && { key: "category", match: { value: category } }, minAge !== undefined && { key: "age", range: { gte: minAge } }, maxAge !== undefined && { key: "age", range: { lte: maxAge } }].filter(Boolean) as never[];
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
     let items: ReturnType<typeof rowToCase>[] = [];
     if (scoreMap.size) {
       const ids = [...scoreMap.keys()];
-      const [rows] = await getMySqlPool().query<RowDataPacket[]>(`${CASE_SELECT} WHERE mc.id IN (${ids.map(() => "?").join(",")}) AND mc.deleted_at IS NULL`, ids);
+      const [rows] = await getMySqlPool().query<RowDataPacket[]>(`${CASE_SELECT} WHERE mc.id IN (${ids.map(() => "?").join(",")}) AND mc.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM case_sync_outbox o WHERE o.case_id=mc.id AND o.processed_at IS NULL)`, ids);
       items = rows.map(rowToCase);
     }
     const results = items.map((item) => ({ ...item, score: scoreMap.get(item.id) ?? 0, matchReason: "Qdrant cosine similarity" })).sort((a, b) => b.score - a.score);

@@ -3,6 +3,64 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
 import { CASE_CATEGORIES } from "@/lib/utils";
+import type { MedicalCase } from "@/types";
 
-export function CaseForm(){const router=useRouter();const[loading,setLoading]=useState(false);const[message,setMessage]=useState("");async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setLoading(true);setMessage("");const f=new FormData(e.currentTarget);const body={patientAge:Number(f.get("patientAge")),patientGender:f.get("patientGender"),category:f.get("category"),symptoms:f.get("symptoms"),medicalHistory:f.get("medicalHistory"),clinicalObservations:f.get("clinicalObservations"),diagnosis:f.get("diagnosis"),treatment:f.get("treatment"),notes:f.get("notes"),labResults:{summary:f.get("labResults")||"Not recorded"},examinationDetails:{summary:f.get("examinationDetails")||"Not recorded"}};let r:Response,data;try{r=await fetch("/api/cases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});data=await r.json()}catch{setMessage("Could not reach the server. Please try again.");setLoading(false);return}if(!r.ok){setMessage(data.error);setLoading(false);return}setMessage(data.demo?`Demo case ${data.item.caseCode} validated successfully. Use database mode to persist it.`:"Case created successfully.");setLoading(false);if(!data.demo){router.push(`/cases/${data.item.id}`);router.refresh()}}return <form onSubmit={submit} className="space-y-5"><section className="card p-6"><h2 className="text-lg font-extrabold">Patient information</h2><p className="mt-1 text-sm text-muted">Only anonymous demographic attributes are collected.</p><div className="mt-5 grid gap-4 sm:grid-cols-3"><div><label className="label">Age</label><input className="input" name="patientAge" type="number" min="0" max="120" defaultValue="42" required/></div><div><label className="label">Gender</label><select className="input" name="patientGender" defaultValue="FEMALE"><option value="FEMALE">Female</option><option value="MALE">Male</option><option value="OTHER">Other</option></select></div><div><label className="label">Case category</label><input className="input" name="category" list="case-categories" defaultValue="Respiratory" required/><datalist id="case-categories">{CASE_CATEGORIES.map(c=><option key={c} value={c}/>)}</datalist></div></div></section><section className="card p-6"><h2 className="text-lg font-extrabold">Clinical information</h2><div className="mt-5 grid gap-4 lg:grid-cols-2"><Field name="symptoms" label="Symptoms" value="Persistent cough, fever and difficulty breathing"/><Field name="medicalHistory" label="Medical history" value="No known chronic disease; recent upper respiratory infection"/><Field name="clinicalObservations" label="Clinical observations" value="Mild tachypnoea and crackles at the right lung base"/><Field name="examinationDetails" label="Flexible examination details (MongoDB)" value="Oxygen saturation 93%; temperature 38.2 C"/><Field name="diagnosis" label="Primary diagnosis" value="Community-acquired pneumonia"/><Field name="treatment" label="Treatment plan" value="Oral antibiotics, hydration, rest and review in 48 hours"/><Field name="labResults" label="Laboratory / report summary (MongoDB)" value="WBC elevated; chest X-ray shows right lower-lobe opacity"/><Field name="notes" label="Additional notes" value="Synthetic academic record for similarity-search demonstration"/></div></section>{message&&<div className={`rounded-xl p-4 text-sm font-semibold ${message.includes("success")||message.includes("validated")?"bg-teal-50 text-teal-700":"bg-red-50 text-red-700"}`}>{message}</div>}<div className="flex justify-end"><button className="btn-primary" disabled={loading}><Save size={17}/>{loading?"Saving…":"Save and index case"}</button></div></form>}
-function Field({name,label,value}:{name:string;label:string;value:string}){return <div><label className="label">{label}</label><textarea className="input min-h-28 resize-y" name={name} defaultValue={value} required={!['medicalHistory','notes','labResults','examinationDetails'].includes(name)}/></div>}
+const example = {
+  symptoms: "Persistent cough, fever and difficulty breathing",
+  medicalHistory: "No known chronic disease; recent upper respiratory infection",
+  clinicalObservations: "Mild tachypnoea and crackles at the right lung base",
+  examinationDetails: "Oxygen saturation 93%; temperature 38.2 C",
+  diagnosis: "Community-acquired pneumonia",
+  treatment: "Oral antibiotics, hydration, rest and review in 48 hours",
+  labResults: "WBC elevated; chest X-ray shows right lower-lobe opacity",
+  notes: "Synthetic academic record for similarity-search demonstration",
+};
+const fields = [
+  ["symptoms", "Symptoms"], ["medicalHistory", "Medical history"],
+  ["clinicalObservations", "Clinical observations"], ["examinationDetails", "Flexible examination details (MongoDB)"],
+  ["diagnosis", "Primary diagnosis"], ["treatment", "Treatment plan"],
+  ["labResults", "Laboratory / report summary (MongoDB)"], ["notes", "Additional notes"],
+] as const;
+
+export function CaseForm({ initialItem }: { initialItem?: MedicalCase }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setLoading(true); setMessage("");
+    const data = new FormData(event.currentTarget);
+    const text = (name: string) => String(data.get(name) ?? "");
+    const body = {
+      patientAge: Number(data.get("patientAge")), patientGender: text("patientGender"), category: text("category"),
+      symptoms: text("symptoms"), medicalHistory: text("medicalHistory"), clinicalObservations: text("clinicalObservations"),
+      diagnosis: text("diagnosis"), treatment: text("treatment"), notes: text("notes"),
+      labResults: { ...initialItem?.labResults, summary: text("labResults") },
+      examinationDetails: { ...initialItem?.examinationDetails, summary: text("examinationDetails") },
+    };
+    try {
+      const response = await fetch(initialItem ? `/api/cases/${initialItem.id}` : "/api/cases", { method: initialItem ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json();
+      if (!response.ok) { setMessage(result.error); return; }
+      if (result.demo) { setMessage("Demo case validated successfully. Use database mode to persist it."); return; }
+      router.push(`/cases/${result.item.id}`); router.refresh();
+    } catch { setMessage("Could not reach the server. Refresh the library before retrying a save."); }
+    finally { setLoading(false); }
+  }
+  function initial(name: keyof typeof example) {
+    if (!initialItem) return example[name];
+    if (name === "labResults" || name === "examinationDetails") return String(initialItem[name]?.summary ?? "");
+    return initialItem[name];
+  }
+  return <form onSubmit={submit} className="space-y-5">
+    <section className="card p-6"><h2 className="text-lg font-extrabold">Patient information</h2><p className="mt-1 text-sm text-muted">Only anonymous demographic attributes are collected.</p>
+      <div className="mt-5 grid gap-4 sm:grid-cols-3">
+        <div><label className="label" htmlFor="patientAge">Age</label><input className="input" id="patientAge" name="patientAge" type="number" min="0" max="120" defaultValue={initialItem?.patientAge ?? 42} required/></div>
+        <div><label className="label" htmlFor="patientGender">Gender</label><select className="input" id="patientGender" name="patientGender" defaultValue={initialItem?.patientGender ?? "FEMALE"}><option value="FEMALE">Female</option><option value="MALE">Male</option><option value="OTHER">Other</option></select></div>
+        <div><label className="label" htmlFor="category">Case category</label><input className="input" id="category" name="category" list="case-categories" defaultValue={initialItem?.category ?? "Respiratory"} required/><datalist id="case-categories">{CASE_CATEGORIES.map(c => <option key={c} value={c}/>)}</datalist></div>
+      </div>
+    </section>
+    <section className="card p-6"><h2 className="text-lg font-extrabold">Clinical information</h2><div className="mt-5 grid gap-4 lg:grid-cols-2">{fields.map(([name, label]) => <div key={name}><label className="label" htmlFor={name}>{label}</label><textarea className="input min-h-28 resize-y" id={name} name={name} defaultValue={initial(name)} required={!["medicalHistory", "notes", "labResults", "examinationDetails"].includes(name)}/></div>)}</div></section>
+    {message && <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">{message}</p>}
+    <div className="flex justify-end"><button className="btn-primary" disabled={loading}><Save size={17}/>{loading ? "Saving…" : "Save and index case"}</button></div>
+  </form>;
+}

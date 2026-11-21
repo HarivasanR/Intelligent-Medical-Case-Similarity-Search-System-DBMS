@@ -103,6 +103,9 @@ export async function deactivateDatabaseUser(targetUserId: number, actorAdminId:
   const connection = await pool.getConnection();
 
   try {
+    await connection.beginTransaction();
+    // Lock the role row to serialize admin deactivations before counting active admins.
+    await connection.query("SELECT id FROM roles WHERE name='ADMIN' FOR UPDATE");
     // 2. Find target user and their role
     const [rows] = await connection.execute<RowDataPacket[]>(
       `SELECT u.id, u.full_name, u.is_active, r.name AS role
@@ -136,8 +139,7 @@ export async function deactivateDatabaseUser(targetUserId: number, actorAdminId:
       }
     }
 
-    // 4. Begin transaction for soft deactivation
-    await connection.beginTransaction();
+    // The transaction already holds the role lock.
 
     await connection.execute(
       "UPDATE users SET is_active = FALSE WHERE id = ?",

@@ -1,6 +1,9 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, SESSION_HOURS, signSessionToken, verifySessionToken } from "@/lib/session-token";
 import type { Role, SessionUser } from "@/types";
+import { isDemoMode } from "@/lib/utils";
+import { getMySqlPool } from "@/lib/mysql";
+import type { RowDataPacket } from "mysql2";
 
 export async function createSession(user: SessionUser) {
   const token = await signSessionToken(user);
@@ -12,7 +15,11 @@ export async function clearSession() { (await cookies()).delete(SESSION_COOKIE);
 
 export async function getSession(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  return token ? verifySessionToken(token) : null;
+  const session = token ? await verifySessionToken(token) : null;
+  if (!session || isDemoMode()) return session;
+  // Recheck access on every server request: deactivation revokes existing cookies too.
+  const [rows] = await getMySqlPool().query<RowDataPacket[]>("SELECT u.id, u.full_name, u.email, r.name role FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.is_active=TRUE", [session.id]);
+  return rows.length ? { id: Number(rows[0].id), name: rows[0].full_name, email: rows[0].email, role: rows[0].role } : null;
 }
 
 export async function requireSession(roles?: Role[]) {

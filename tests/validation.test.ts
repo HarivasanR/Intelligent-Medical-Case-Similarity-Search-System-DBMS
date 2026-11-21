@@ -24,6 +24,10 @@ describe("input validation", () => {
     ).toBe(false));
   it("rejects an empty semantic query", () =>
     expect(searchSchema.safeParse({ query: "" }).success).toBe(false));
+  it("rejects whitespace-only search and reversed age ranges", () => {
+    expect(searchSchema.safeParse({ query: "   " }).success).toBe(false);
+    expect(searchSchema.safeParse({ query: "cough fever", minAge: 60, maxAge: 20 }).success).toBe(false);
+  });
   it("accepts a valid new user with ADMIN role", () =>
     expect(
       createUserSchema.safeParse({

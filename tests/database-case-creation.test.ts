@@ -11,8 +11,9 @@ const {
   getConnectionMock: vi.fn(),
 }));
 
+vi.mock("@/services/case-sync", () => ({ processCaseSync: vi.fn().mockResolvedValue(0) }));
 vi.mock("@/lib/mysql", () => ({
-  getMySqlPool: () => ({ getConnection: getConnectionMock }),
+  getMySqlPool: () => ({ getConnection: getConnectionMock, query: vi.fn().mockResolvedValue([[{ n: 0 }]]) }),
 }));
 
 vi.mock("@/lib/mongodb", () => ({ getMongoDb: vi.fn() }));
@@ -52,6 +53,7 @@ describe("createDatabaseCase transactional outbox", () => {
     getConnectionMock.mockResolvedValue({
       beginTransaction: beginTransactionMock,
       execute: executeMock,
+      query: vi.fn().mockResolvedValue([[], []]),
       commit: commitMock,
       rollback: rollbackMock,
       release: releaseMock,
@@ -60,16 +62,16 @@ describe("createDatabaseCase transactional outbox", () => {
 
   it("writes the outbox event in the same transaction before committing", async () => {
     const result = await createDatabaseCase(input, 5);
-    const outboxCall = executeMock.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO case_outbox"));
+    const outboxCall = executeMock.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO case_sync_outbox"));
 
     expect(result.id).toBe(42);
     expect(result.caseCode).toMatch(/^MC-/);
     expect(beginTransactionMock).toHaveBeenCalledOnce();
     expect(outboxCall).toBeDefined();
     expect(outboxCall?.[1]).toEqual([
-      "CASE_CREATED",
       42,
-      expect.stringContaining('"caseId":42'),
+      "UPSERT",
+      expect.stringContaining('"id":42'),
     ]);
     expect(String(outboxCall?.[1][2])).toContain('"diagnosis":"Pneumonia"');
     expect(commitMock).toHaveBeenCalledOnce();
@@ -83,7 +85,7 @@ describe("createDatabaseCase transactional outbox", () => {
       if (sql.includes("INSERT INTO medical_cases")) return [{ insertId: 42 }, []];
       if (sql.includes("INSERT INTO diagnoses")) return [{ insertId: 7 }, []];
       if (sql.includes("INSERT INTO treatments")) return [{ insertId: 8 }, []];
-      if (sql.includes("INSERT INTO case_outbox")) throw failure;
+      if (sql.includes("INSERT INTO case_sync_outbox")) throw failure;
       return [{ insertId: 0 }, []];
     });
 
